@@ -2,46 +2,84 @@
 
 import { useState } from "react";
 import WordUpload from "./components/WordUpload";
+import DocxViewer from "./components/DocxViewer";
+import { parseDocxFile, DocxParseResult } from "./utils/docxParser";
 
-// ponytail: step 1 upload with visual confirmation feedback
+// ponytail: split 2-column UI when docx parsing succeeds
 export default function Home() {
-  const [confirmedFile, setConfirmedFile] = useState<File | null>(null);
+  const [parseResult, setParseResult] = useState<DocxParseResult | null>(null);
+  const [isParsing, setIsParsing] = useState<boolean>(false);
+  const [parseError, setParseError] = useState<string | null>(null);
 
-  const handleFileConfirmed = (file: File) => {
-    setConfirmedFile(file);
+  const handleFileConfirmed = async (file: File) => {
+    setIsParsing(true);
+    setParseError(null);
+    try {
+      const result = await parseDocxFile(file);
+      setParseResult(result);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (err: any) {
+      console.error("Docx parse error:", err);
+      setParseError(
+        err?.message ||
+          "Gagal membaca berkas .docx. Harap pastikan berkas tidak rusak.",
+      );
+    } finally {
+      setIsParsing(false);
+    }
   };
 
   const handleReset = () => {
-    setConfirmedFile(null);
+    setParseResult(null);
+    setParseError(null);
   };
 
   return (
-    <main className="min-vh-100 d-flex flex-column align-items-center justify-content-center py-4">
-      {confirmedFile ? (
-        <div className="w-100 max-w-lg mx-auto px-3 py-4 text-center">
-          <div className="bg-panel p-4 rounded-4 text-center">
-            <div className="d-inline-flex align-items-center justify-content-center bg-success bg-opacity-10 text-success rounded-circle p-3 mb-3">
-              <svg width="32" height="32" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-              </svg>
+    <main className="min-vh-100 py-4 px-3 d-flex flex-column align-items-center justify-content-center">
+      {parseResult ? (
+        /* 2-Column Split View when Parsing Succeeds */
+        <div className="container-fluid max-w-7xl">
+          <div className="row g-4 align-items-stretch">
+            {/* Left Column: Upload Form UI */}
+            <div className="col-12 col-lg-5 d-flex flex-column justify-content-center">
+              <div className="bg-panel rounded-4 p-4">
+                <WordUpload onFileConfirmed={handleFileConfirmed} />
+              </div>
             </div>
-            <h2 className="h5 text-white mb-2 font-serif">Berkas Berhasil Diterima</h2>
-            <p className="text-sub small mb-3">
-              <strong className="text-white">{confirmedFile.name}</strong> siap untuk tahap berikutnya (Tinjau & Ekspor).
-            </p>
-            <button
-              onClick={handleReset}
-              className="btn btn-outline-light rounded-pill px-4 py-2 small"
-            >
-              Pilih Berkas Lain
-            </button>
+
+            {/* Right Column: Scanned Docx Result Viewer */}
+            <div className="col-12 col-lg-7 d-flex flex-column">
+              <DocxViewer parseResult={parseResult} onReset={handleReset} />
+            </div>
           </div>
         </div>
       ) : (
-        <WordUpload onFileConfirmed={handleFileConfirmed} />
+        /* Single Column View (Upload Only) */
+        <div className="w-100 max-w-lg mx-auto">
+          {isParsing ? (
+            <div className="bg-panel rounded-4 p-5 text-center text-white">
+              <div className="spinner-border text-danger mb-3" role="status">
+                <span className="visually-hidden">Memproses...</span>
+              </div>
+              <h2 className="h5 font-serif mb-2">
+                Membaca & Memproses Berkas Word
+              </h2>
+              <p className="text-sub small mb-0">
+                Mengekstrak paragraf, format cetak tebal, dan bagian liturgi...
+              </p>
+            </div>
+          ) : (
+            <>
+              <WordUpload onFileConfirmed={handleFileConfirmed} />
+              {parseError && (
+                <div className="alert alert-danger mt-3 py-2 px-3 small border-0 bg-danger bg-opacity-10 text-danger text-center rounded-3">
+                  {parseError}
+                </div>
+              )}
+            </>
+          )}
+        </div>
       )}
     </main>
   );
 }
-
-
