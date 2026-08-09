@@ -1,0 +1,153 @@
+# Project Context: Liturgy Slide Automation App
+
+## What this app does
+
+This is a Next.js web app that automates the creation of weekly Catholic
+Mass liturgy PowerPoint slides for a church. Every week, the church
+office prepares a Word document (.docx) containing the full liturgy text
+(prayers, readings, responses) for that Sunday's Mass. That text then
+needs to be manually copy-pasted into a fixed 117-slide PowerPoint
+template that follows the Mass structure. This app automates that
+copy-paste step: parse the Word doc, extract the relevant text per
+section, and inject it into the matching placeholders in a duplicate of
+the PPTX template — producing a ready-to-use slide deck in seconds
+instead of the ~30-60 minutes it currently takes to do by hand.
+
+This is a single-purpose internal tool for one specific church's
+workflow, not a generic document-to-slide converter. The Word document
+structure and the PPTX template structure are both fixed and known in
+advance (see below). Do not over-engineer this into a configurable /
+general-purpose mapping system — the mapping rules are intentionally
+hardcoded to this one template.
+
+## Source document: the Word file
+
+The weekly Word doc (.docx) contains the full liturgy in a fixed,
+predictable structure:
+
+- **Major sections** are marked with **bold + underline** text (e.g.
+  "RITUS PEMBUKA", "LITURGI SABDA", "LITURGI EKARISTI", "RITUS PENUTUP").
+- **Sub-sections** (e.g. "Doa Kolekta", "Bacaan I", "Bacaan II",
+  "Mazmur Tanggapan", "Injil", "Doa Umat", "Doa Atas Persembahan", "Doa
+  Sesudah Komuni") are marked with **bold only**, usually followed by an
+  italic annotation like *(umat berdiri)* ("congregation stands") or
+  *(umat duduk)* ("congregation sits").
+- Some sub-sections have **no body text** below them (e.g. "Tanda
+  Salib", "Kudus", "Homili") — these are sung or led live and should be
+  skipped entirely; they never produce a slide.
+- Readings (Bacaan I, Bacaan II, Injil) follow this exact sub-pattern:
+  1. An **italicized quoted line** in quotes — a short thematic epigraph
+     for the reading (e.g. `*"Berdirilah di atas gunung itu di hadapan
+     Tuhan."*`)
+  2. A **bold source line** naming the book/chapter/verse, prefixed with
+     the speaker label `L` (Lektor), e.g. `L **Bacaan dari Kitab Pertama
+     Raja-raja 19:9a.11-13a**`
+  3. The **full body text** of the reading (this is long — goes to
+     speaker notes, not the visible slide, see mapping below)
+  4. A closing formula ("Demikianlah sabda Tuhan" / response)
+- **Mazmur Tanggapan** (Responsorial Psalm) has a fixed sung melody
+  (already baked into the PPTX template as text using a custom notation
+  font) plus 2-4 **numbered verses** (bait) of lyrics that change weekly.
+  Verse count varies week to week.
+- **Doa Umat** (Prayers of the Faithful) has a fixed intro line, then a
+  **variable number of intentions** (typically 3-5), each formatted as
+  `L **[bold intention title].** [prayer body text] Kami mohon...`
+  followed by a fixed congregational response line, then a fixed closing
+  line. The number of intentions varies week to week — this is the key
+  case where the number of output slides must scale with the number of
+  items found, not be fixed.
+- Occasional **one-off prayers** appear in some weeks only (e.g. a
+  building fund prayer, a special novena prayer) and are absent in
+  others — these map to a placeholder that should simply be left blank
+  when not found in a given week's document, not deleted or skipped.
+- Song lyrics (Nyanyian Pembuka, Persembahan, Komuni, Penutup) are
+  **NOT included** in this Word document — they live in a separate file
+  and are explicitly **out of scope for the MVP**. Do not attempt to
+  parse or map them.
+- Announcements (Pengumuman Gereja) are also **out of scope for the
+  MVP** — always skipped.
+
+## Target document: the PPTX template
+
+The PPTX template is a **fixed 117-slide deck** that already contains
+the full Mass running order, correct fonts, layout, and styling. It is
+not a small set of reusable "master" slides — it is the actual full
+deck, week after week, where only specific text placeholders change.
+
+- Editable placeholders are literally the text `( teks )` typed inside a
+  text box on the slide, in the position/style where the real content
+  should go. Some slides have one `( teks )` placeholder, some have two
+  (e.g. reading slides have one for the epigraph quote and one for the
+  source citation).
+- Some content is meant to go into **PowerPoint speaker notes**, not the
+  visible slide body — specifically the full body text of readings
+  (Bacaan I, II, Injil). The visible slide only shows the short epigraph
+  quote and the source citation; the notes pane holds the full text for
+  the lector/reader to reference. Existing notes slides already contain
+  a `(jangan diblank)` ("don't leave blank") reminder — this convention
+  predates this app and must be preserved.
+- Musical notation (Mazmur melody, Bait Pengantar Injil, Anamnesis) is
+  **already present as styled text** in the template using a custom
+  notation encoding (characters like `j`, `k`, `.`, `!`, `#` render as
+  pitch/octave marks via a special font). This notation is fixed and
+  never changes week to week — only the lyric placeholders below/beside
+  it change.
+- When a source section is genuinely not present in that week's Word
+  doc (e.g. "Seruan Tobat" is sometimes replaced by a different penance
+  rite), the matching placeholder is simply **left blank** — the slide
+  stays in the deck, it's just empty. It is not deleted.
+- When a source section has a **variable number of repeating items**
+  (Doa Umat intentions, Mazmur verses), the app must **duplicate** the
+  corresponding template slide once per item found, preserving the
+  slide's layout/formatting, and insert each item into its own copy.
+
+## Known placeholder-to-slide mapping (MVP scope)
+
+| Content | Slide # | Mode |
+|---|---|---|
+| Seruan Tobat (3 lines) | 22, 23, 24 | Fill if present, else leave blank |
+| Doa Kolekta | 33 | Simple fill |
+| Bacaan Pertama — epigraph quote | 35 (placeholder 1) | Simple fill |
+| Bacaan Pertama — source citation | 35 (placeholder 2) | Simple fill |
+| Bacaan Pertama — full body | notes on slide 35 | Simple fill (notes) |
+| Mazmur Tanggapan verses | 39, 41, 43 | One slide per verse found (2-3 typical) |
+| Bacaan Kedua — epigraph / citation / body | 46 (+ notes) | Same pattern as Bacaan Pertama |
+| Bacaan Injil — Gospel citation (e.g. "Matius 14:22-33") | 50 | Simple fill |
+| Bacaan Injil — epigraph / citation / body | 51 (+ notes) | Same pattern as Bacaan Pertama |
+| Doa Umat — intro line | 68 | Simple fill |
+| Doa Umat — each intention (title + body) | 69 | **Duplicate per intention** (3-5 typical) |
+| Doa Umat — closing line | 71 | Simple fill |
+| Doa Atas Persembahan | 77 | Simple fill |
+| Doa Sesudah Komuni | 97 | Simple fill |
+
+Out of scope for MVP (must NOT be touched by the app): song lyrics
+(slides 74, 95, 117), musical notation, church announcements (slides
+102-112).
+
+## Tech stack
+
+- **Next.js** (App Router), TypeScript
+- Word parsing: unzip the .docx (it's a ZIP of XML) and read
+  `word/document.xml` directly — parse run-level `bold`/`underline`/
+  `italic` formatting to detect structure, rather than relying on an
+  LLM to interpret the document. The structure is 100% deterministic
+  from the XML, so no AI/LLM call is needed or wanted for this step.
+- PPTX generation: unzip the template .pptx, locate `( teks )` tokens
+  inside `ppt/slides/slideN.xml`, replace them with parsed content,
+  duplicate slide XML + relationships when an item needs to repeat,
+  write speaker notes into the corresponding `ppt/notesSlides/` file.
+  Must handle PowerPoint's tendency to split a single visual string
+  across multiple `<a:r>` runs — merge runs within a paragraph before
+  searching for the `( teks )` token, don't assume it's a single intact
+  run.
+- No OCR, no vision LLM calls anywhere in this pipeline — the source is
+  already structured text (Word), and the notation graphics are
+  explicitly out of scope.
+
+## UX principle
+
+The user (a single church volunteer who prepares slides weekly) should
+be able to: upload this week's Word doc → see a preview of what was
+detected and where it will go → fix anything mis-detected → export the
+final .pptx. Parsing should never silently guess wrong; ambiguous or
+missing sections should be visibly flagged in the preview, not hidden.

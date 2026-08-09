@@ -1,7 +1,80 @@
-/* ponytail: bootstrap import replacement */
+/* ponytail: bootstrap import & dark warm-neutral liturgical theme */
 @import "bootstrap/dist/css/bootstrap.min.css";
+
+:root {
+  --bg-dark: #141216;
+  --panel-bg: #1e1b22;
+  --panel-border: #332d39;
+  --panel-border-hover: #544b5e;
+  --wine-accent: #8b263e;
+  --wine-accent-hover: #a3304b;
+  --wine-accent-light: rgba(139, 38, 62, 0.15);
+  --text-main: #f4f2f5;
+  --text-sub: #b1a9b6;
+  --text-muted: #7c7482;
+}
 
 body {
   min-height: 100vh;
+  background-color: var(--bg-dark);
+  color: var(--text-main);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
+
+.font-serif {
+  font-family: "Playfair Display", Georgia, Cambria, "Times New Roman", Times, serif;
+}
+
+.bg-panel {
+  background-color: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+}
+
+.btn-wine {
+  background-color: var(--wine-accent);
+  color: #ffffff;
+  border: none;
+  transition: all 0.2s ease;
+}
+
+.btn-wine:hover:not(:disabled) {
+  background-color: var(--wine-accent-hover);
+  color: #ffffff;
+}
+
+.btn-wine:disabled {
+  background-color: #3d242c;
+  color: #7a5e66;
+  opacity: 0.7;
+}
+
+.dropzone {
+  background-color: var(--panel-bg);
+  border: 2px dashed var(--panel-border);
+  border-radius: 1rem;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  outline: none;
+}
+
+.dropzone:hover,
+.dropzone:focus-visible {
+  border-color: var(--wine-accent);
+  background-color: rgba(30, 27, 34, 0.8);
+  box-shadow: 0 0 0 3px var(--wine-accent-light);
+}
+
+.dropzone.drag-active {
+  border-color: var(--wine-accent);
+  background-color: var(--wine-accent-light);
+}
+
+.text-sub {
+  color: var(--text-sub);
+}
+
+.text-muted-custom {
+  color: var(--text-muted);
+}
+
 
