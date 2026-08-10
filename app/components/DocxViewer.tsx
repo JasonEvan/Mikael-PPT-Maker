@@ -12,10 +12,12 @@ interface DocxViewerProps {
   onReset?: () => void;
 }
 
-// ponytail: modern segmented tab bar with search support across all views
+// ponytail: modern segmented tab bar with search and PPTX download generator
 export default function DocxViewer({ parseResult, onReset }: DocxViewerProps) {
   const [activeTab, setActiveTab] = useState<"mapped" | "sections" | "raw">("mapped");
   const [searchTerm, setSearchTerm] = useState<string>("");
+  const [isGenerating, setIsGenerating] = useState<boolean>(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   const mappedData: MappedLiturgyData = selectRelevantSections(parseResult);
 
@@ -41,10 +43,45 @@ export default function DocxViewer({ parseResult, onReset }: DocxViewerProps) {
     return false;
   };
 
+  // ponytail: handle PPTX download API request
+  const handleDownloadPptx = async () => {
+    setIsGenerating(true);
+    setDownloadError(null);
+    try {
+      const response = await fetch("/api/generate-pptx", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ mappedData }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData?.error || "Gagal mengunduh berkas PPTX.");
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Slide_Liturgi_${parseResult.fileName.replace(/\.docx$/i, "")}.pptx`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      a.remove();
+    } catch (err: any) {
+      console.error("Download PPTX error:", err);
+      setDownloadError(err?.message || "Terjadi kesalahan saat mengunduh berkas PowerPoint.");
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   return (
     <div className="w-100 h-100 d-flex flex-column bg-panel rounded-4 p-4 text-white shadow-lg border border-secondary-subtle">
-      {/* Header Info */}
-      <div className="d-flex align-items-center justify-content-between pb-3 mb-3 border-bottom border-secondary-subtle">
+      {/* Header Info & Action Buttons */}
+      <div className="d-flex flex-column flex-sm-row align-items-sm-center justify-content-between pb-3 mb-3 border-bottom border-secondary-subtle gap-3">
         <div>
           <span className="badge rounded-pill px-3 py-1 fw-medium mb-1" style={{ backgroundColor: "rgba(74, 222, 128, 0.15)", color: "#4ade80", border: "1px solid rgba(74, 222, 128, 0.3)" }}>
             Parsing & Pemetaan Berhasil
@@ -56,16 +93,47 @@ export default function DocxViewer({ parseResult, onReset }: DocxViewerProps) {
             Terdeteksi <strong className="text-white">{parseResult.sections.length}</strong> Bagian ({parseResult.totalParagraphs} paragraf)
           </p>
         </div>
-        {onReset && (
+
+        <div className="d-flex align-items-center gap-2">
+          {onReset && (
+            <button
+              type="button"
+              onClick={onReset}
+              className="btn btn-sm btn-outline-light rounded-pill px-3 py-2"
+            >
+              Ganti Berkas
+            </button>
+          )}
+
           <button
             type="button"
-            onClick={onReset}
-            className="btn btn-sm btn-outline-light rounded-pill px-3 py-1.5"
+            disabled={isGenerating}
+            onClick={handleDownloadPptx}
+            className="btn btn-wine btn-sm rounded-pill px-4 py-2 fw-semibold d-flex align-items-center gap-2 shadow-sm"
           >
-            Tutup
+            {isGenerating ? (
+              <>
+                <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                <span>Membuat PPTX...</span>
+              </>
+            ) : (
+              <>
+                <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                <span>Unduh PPTX</span>
+              </>
+            )}
           </button>
-        )}
+        </div>
       </div>
+
+      {/* Download Error Alert */}
+      {downloadError && (
+        <div className="alert alert-danger border-0 bg-danger bg-opacity-10 text-danger p-3 rounded-3 mb-3 small" role="alert">
+          <strong>⚠️ {downloadError}</strong>
+        </div>
+      )}
 
       {/* Modern Segmented Tab Bar & Integrated Search */}
       <div className="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
