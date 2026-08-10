@@ -371,7 +371,7 @@ export async function generatePPTXBuffer(
 
   // Tracking section states dynamically across content slides
   let seruanCount = 0;
-  let mazmurCount = 0;
+  let hasHandledMazmur = false;
   let hasPassedBacaanPertama = false;
   let hasPassedBacaanKedua = false;
 
@@ -483,42 +483,38 @@ export async function generatePPTXBuffer(
       }
     }
 
-    // 4. Mazmur Tanggapan Content Slides (occurs between Bacaan Pertama and Bacaan Kedua)
+    // 4. Mazmur Tanggapan Content Slide (duplication for all verses sequentially)
     else if (
       hasPassedBacaanPertama &&
       !hasPassedBacaanKedua &&
+      !hasHandledMazmur &&
       !slideTextUpper.includes("BACAAN KEDUA")
     ) {
       const verses = mappedData.mazmurTanggapan?.verses || [];
-      if (mazmurCount < 2) {
-        slideXml = replacePlaceholdersInXml(slideXml, [
-          verses[mazmurCount] || "",
-        ]);
-        zip.file(slide.fileName, slideXml);
-        mazmurCount++;
-      } else if (mazmurCount === 2) {
-        const originalSlideXml = slideXml;
-        const filledSlide43Xml = replacePlaceholdersInXml(originalSlideXml, [
-          verses[2] || "",
-        ]);
-        zip.file(slide.fileName, filledSlide43Xml);
+      const originalSlideXml = slideXml;
 
-        if (verses.length > 3) {
-          let lastRId = slide.rId;
-          for (let i = 3; i < verses.length; i++) {
-            const filledVerseXml = replacePlaceholdersInXml(originalSlideXml, [
-              verses[i],
-            ]);
-            const { newRId } = await duplicateSlide(
-              slide.fileName,
-              lastRId,
-              filledVerseXml,
-            );
-            lastRId = newRId;
-          }
+      // Fill 1st verse into 1st Mazmur placeholder slide
+      const filledSlideXml = replacePlaceholdersInXml(originalSlideXml, [
+        verses[0] || "",
+      ]);
+      zip.file(slide.fileName, filledSlideXml);
+
+      // Duplicate slide for all remaining verses (verses[1], verses[2], etc.)
+      if (verses.length > 1) {
+        let lastRId = slide.rId;
+        for (let i = 1; i < verses.length; i++) {
+          const filledVerseXml = replacePlaceholdersInXml(originalSlideXml, [
+            verses[i],
+          ]);
+          const { newRId } = await duplicateSlide(
+            slide.fileName,
+            lastRId,
+            filledVerseXml,
+          );
+          lastRId = newRId;
         }
-        mazmurCount++;
       }
+      hasHandledMazmur = true;
     }
 
     // 5. Bacaan Kedua Content Slide (+ notesSlide3.xml)
