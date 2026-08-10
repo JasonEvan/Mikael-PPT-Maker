@@ -96,6 +96,17 @@ function cleanPrayerBody(lines: string[]): string {
   return filtered.join("\n\n").trim();
 }
 
+// ponytail: helper to check if paragraph is a reading citation line (defining scripture source)
+function isReadingCitationLine(p: LiturgyParagraph, headingTitle: string | null): boolean {
+  const text = (headingTitle || p.rawText).trim();
+
+  // Speaker prefix (L. / I. / L / I) followed by punctuation/space, or scripture source keywords
+  if (/^[LI][\s.]/i.test(text)) return true;
+  if (/bacaan dari|inilah injil|kitab|surat|kisah|warta|nubuat|petikan/i.test(text)) return true;
+
+  return false;
+}
+
 // ponytail: extract text and run formatting from word/document.xml
 export async function parseDocxFile(file: File): Promise<DocxParseResult> {
   const arrayBuffer = await file.arrayBuffer();
@@ -256,14 +267,8 @@ function groupIntoSections(
     const isJustSpeakerLabel =
       headingTitle !== null && /^[ULI][.:]?$/i.test(headingTitle.trim());
 
-    // ponytail: check if paragraph is a reading citation line (e.g. "L. Bacaan dari...", "I. Inilah Injil...")
-    const isCitationLine =
-      headingTitle !== null &&
-      /^[LI][\s.]?/i.test(headingTitle.trim()) &&
-      (headingTitle.includes("Bacaan dari") ||
-        headingTitle.includes("Inilah Injil") ||
-        p.rawText.includes("Bacaan dari") ||
-        p.rawText.includes("Inilah Injil"));
+    // ponytail: check if paragraph is a scripture reading citation line (defining source)
+    const isCitationLine = isReadingCitationLine(p, headingTitle);
 
     // 2. Sub-Section Header condition
     const shouldOpenNewSection =
@@ -349,13 +354,13 @@ function processSectionDetails(section: ParsedLiturgySection): ParsedLiturgySect
       result.epigraph = epigraphLines.join(" ");
     }
 
-    // Citation line (bold line starting with L. / I. or containing Bacaan dari / Inilah Injil)
+    // Citation line (bold line defining scripture source)
     const citationP = section.paragraphs.find(
       (p) =>
         p.isBold &&
-        (p.rawText.includes("Bacaan dari") ||
-          p.rawText.includes("Inilah Injil") ||
-          /^[LI][\s.]/i.test(p.rawText))
+        (isReadingCitationLine(p, getHeadingTitleText(p)) ||
+          p.rawText.includes("Bacaan dari") ||
+          p.rawText.includes("Inilah Injil"))
     );
     if (citationP) {
       result.citation = citationP.rawText;
@@ -418,7 +423,7 @@ export function selectRelevantSections(parsed: DocxParseResult): MappedLiturgyDa
       continue;
     }
 
-    // 2. Doa Kolekta (clean formula lines like Marilah kita berdoa & U. Amin)
+    // 2. Doa Kolekta (clean formula lines)
     if (titleNorm.includes("DOA KOLEKTA") || (titleNorm.includes("KOLEKTA") && !mappedData.doaKolekta)) {
       const lines = sec.body?.filter((b) => b !== sec.title) || [];
       mappedData.doaKolekta = cleanPrayerBody(lines);
