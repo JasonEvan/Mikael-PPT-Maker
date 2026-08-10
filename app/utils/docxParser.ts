@@ -96,12 +96,40 @@ function cleanPrayerBody(lines: string[]): string {
   return filtered.join("\n\n").trim();
 }
 
+// ponytail: helper to clean reading notes body text (excluding header, epigraph, citation, Demikianlah sabda Tuhan, U Syukur kepada Allah)
+function cleanReadingNotesBody(lines: string[], epigraph?: string): string {
+  const normEpigraph = epigraph ? epigraph.replace(/^[*"“']|["”'*]$/g, "").trim().toLowerCase() : "";
+
+  const filtered = lines.filter((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return false;
+
+    // Filter out section headers like "Bacaan I(umat duduk)", "Bacaan II", "Injil"
+    if (/^bacaan\s*(I|II|pertama|kedua|injil)/i.test(trimmed)) return false;
+    if (/^injil/i.test(trimmed)) return false;
+    if (/^\(?umat\s*(duduk|berdiri|berlutut)\)?$/i.test(trimmed)) return false;
+
+    // Filter out epigraph matching lines
+    if (normEpigraph && (trimmed.toLowerCase().includes(normEpigraph) || normEpigraph.includes(trimmed.toLowerCase()))) {
+      return false;
+    }
+
+    // Filter out closing responses
+    if (/^demikianlah\s*(sabda|injil)/i.test(trimmed)) return false;
+    if (/^U[\s.]*(syukur|terpujilah)/i.test(trimmed)) return false;
+    if (/^(syukur kepada allah|terpujilah kristus)\.?$/i.test(trimmed)) return false;
+
+    return true;
+  });
+  return filtered.join("\n\n").trim();
+}
+
 // ponytail: helper to check if paragraph is a reading citation line (defining scripture source)
 function isReadingCitationLine(p: LiturgyParagraph, headingTitle: string | null): boolean {
   const text = (headingTitle || p.rawText).trim();
 
-  // Speaker prefix (L. / I. / L / I) followed by punctuation/space, or scripture source keywords
-  if (/^[LI][\s.]/i.test(text)) return true;
+  // Speaker prefix (L. / I. / L / I) followed by punctuation/space/capital, or scripture source keywords
+  if (/^[LI][.:\s-]*[A-Z]/i.test(text)) return true;
   if (/bacaan dari|inilah injil|kitab|surat|kisah|warta|nubuat|petikan/i.test(text)) return true;
 
   return false;
@@ -332,18 +360,22 @@ function processSectionDetails(section: ParsedLiturgySection): ParsedLiturgySect
   const result = { ...section };
 
   if (section.type === "reading") {
-    // ponytail: collect ALL leading italic/quoted paragraphs for epigraph before bold citation line is hit
+    // ponytail: collect ALL leading italic/quoted paragraphs for epigraph (skipping section header title paragraph at index 0)
     const epigraphLines: string[] = [];
     const epigraphParagraphs: LiturgyParagraph[] = [];
 
-    for (const p of section.paragraphs) {
+    const nonTitleParagraphs = section.paragraphs.slice(1);
+
+    for (const p of nonTitleParagraphs) {
       if (p.isBold) break; // Citation starts with bold line
       if (
         p.isItalic ||
         p.rawText.startsWith('"') ||
         p.rawText.startsWith('“') ||
         p.rawText.startsWith('*"') ||
-        p.rawText.startsWith('*“')
+        p.rawText.startsWith('*“') ||
+        p.rawText.endsWith('"') ||
+        p.rawText.endsWith('”')
       ) {
         epigraphLines.push(p.rawText.replace(/^[*"“']|["”'*]$/g, "").trim());
         epigraphParagraphs.push(p);
@@ -363,11 +395,12 @@ function processSectionDetails(section: ParsedLiturgySection): ParsedLiturgySect
           p.rawText.includes("Inilah Injil"))
     );
     if (citationP) {
-      result.citation = citationP.rawText;
+      // Strip leading L or I speaker prefix (even if fused like LBacaan)
+      result.citation = citationP.rawText.replace(/^[LI][.:\s-]*/i, "").trim();
     }
 
-    // Notes body is full text excluding header, epigraph paragraphs, and citation line
-    const bodyLines = section.paragraphs
+    // Notes body is full text excluding header, epigraph paragraphs, citation line, and Demikianlah sabda Tuhan / U Syukur kepada Allah
+    const rawBodyLines = section.paragraphs
       .filter(
         (p) =>
           !epigraphParagraphs.includes(p) &&
@@ -375,7 +408,7 @@ function processSectionDetails(section: ParsedLiturgySection): ParsedLiturgySect
           p.rawText !== section.title
       )
       .map((p) => p.rawText);
-    result.notesBody = bodyLines.join("\n\n");
+    result.notesBody = cleanReadingNotesBody(rawBodyLines, result.epigraph);
   }
 
   if (section.type === "doa_umat") {

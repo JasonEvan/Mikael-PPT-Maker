@@ -14,6 +14,24 @@ function escapeXml(str: string): string {
     .replace(/'/g, "&apos;");
 }
 
+// ponytail: format epigraph wrapped in quotation marks “...”
+function formatEpigraph(epigraph?: string): string {
+  if (!epigraph || !epigraph.trim()) return "";
+  const trimmed = epigraph.trim();
+  if (trimmed.startsWith("“") || trimmed.startsWith('"')) {
+    return trimmed;
+  }
+  return `“${trimmed}”`;
+}
+
+// ponytail: helper to strip leading L / I / L. / I. / L- / L.  / LBacaan prefix from reading citations
+function cleanCitation(citation?: string): string {
+  if (!citation) return "";
+  let cleaned = citation.trim();
+  cleaned = cleaned.replace(/^[LI][.:\s-]*/i, "").trim();
+  return cleaned;
+}
+
 // ponytail: replace placeholders ( (teks) or (teks) ) in slide XML, handling run-splitting
 function replacePlaceholdersInXml(
   slideXml: string,
@@ -107,23 +125,23 @@ function stripClosingParagraphs(slideXml: string): string {
   });
 }
 
-// ponytail: update speaker notes in ppt/notesSlides/notesSlideX.xml
+// ponytail: update speaker notes in ppt/notesSlides/notesSlideX.xml, completely replacing template notes
 function updateNotesSlideXml(notesXml: string, notesText: string): string {
   if (!notesText) return notesXml;
   const escapedNotes = escapeXml(notesText);
 
-  // Preserve (jangan diblank) reminder if present
-  if (/(\(\s*jangan diblank\s*\))/i.test(notesXml)) {
-    return notesXml.replace(
-      /(\(\s*jangan diblank\s*\))/i,
-      `$1\n\n${escapedNotes}`,
-    );
-  } else {
-    return notesXml.replace(
-      /(<\/p:txBody>)/,
-      `<a:p><a:r><a:t>${escapedNotes}</a:t></a:r></a:p>$1`,
-    );
-  }
+  const paragraphs = escapedNotes
+    .split(/\n\n+/)
+    .map((para) => `<a:p><a:r><a:t>${para}</a:t></a:r></a:p>`)
+    .join("");
+
+  // Target the txBody inside the shape that contains type="body" placeholder
+  return notesXml.replace(
+    /(<p:sp>[\s\S]*?<p:ph[^>]*type="body"[\s\S]*?<p:txBody>)([\s\S]*?)(<\/p:txBody>[\s\S]*?<\/p:sp>)/i,
+    (match, prefix) => {
+      return `${prefix}<a:bodyPr/><a:lstStyle/>${paragraphs}</p:txBody></p:sp>`;
+    },
+  );
 }
 
 // ponytail: dynamically calculate overflow cut points for any text based on character limit & punctuation boundaries (. , ! ? ;)
@@ -410,8 +428,8 @@ export async function generatePPTXBuffer(
 
     // 3. Bacaan Pertama (Slide 35 + notesSlide2.xml)
     else if (sNum === 35) {
-      const epigraph = mappedData.bacaanPertama?.epigraph || "";
-      const citation = mappedData.bacaanPertama?.citation || "";
+      const epigraph = formatEpigraph(mappedData.bacaanPertama?.epigraph);
+      const citation = cleanCitation(mappedData.bacaanPertama?.citation);
       slideXml = replacePlaceholdersInXml(slideXml, [epigraph, citation]);
       zip.file(slide.fileName, slideXml);
 
@@ -460,8 +478,8 @@ export async function generatePPTXBuffer(
 
     // 5. Bacaan Kedua (Slide 46 + notesSlide3.xml)
     else if (sNum === 46) {
-      const epigraph = mappedData.bacaanKedua?.epigraph || "";
-      const citation = mappedData.bacaanKedua?.citation || "";
+      const epigraph = formatEpigraph(mappedData.bacaanKedua?.epigraph);
+      const citation = cleanCitation(mappedData.bacaanKedua?.citation);
       slideXml = replacePlaceholdersInXml(slideXml, [epigraph, citation]);
       zip.file(slide.fileName, slideXml);
 
@@ -487,8 +505,8 @@ export async function generatePPTXBuffer(
 
     // 7. Bacaan Injil - Epigraph & Citation (Slide 51 + notesSlide6.xml)
     else if (sNum === 51) {
-      const epigraph = mappedData.bacaanInjil?.epigraph || "";
-      const citation = mappedData.bacaanInjil?.citation || "";
+      const epigraph = formatEpigraph(mappedData.bacaanInjil?.epigraph);
+      const citation = cleanCitation(mappedData.bacaanInjil?.citation);
       slideXml = replacePlaceholdersInXml(slideXml, [epigraph, citation]);
       zip.file(slide.fileName, slideXml);
 
