@@ -88,6 +88,66 @@ function replacePlaceholdersInXml(
   });
 }
 
+// ponytail: helper to fill Doa Umat intention slide (Placeholder 1 = Bold Title + Unbold Body separated by \n, Placeholder 2 = Yellow Italic Response)
+function replaceDoaUmatIntentionInXml(
+  slideXml: string,
+  title: string,
+  body: string,
+  response?: string,
+): string {
+  let replacementIndex = 0;
+
+  return slideXml.replace(/<a:p>[\s\S]*?<\/a:p>/g, (pBlock) => {
+    const tMatches = pBlock.match(/<a:t[^>]*>(.*?)<\/a:t>/g) || [];
+    const fullText = tMatches.map((t) => t.replace(/<[^>]+>/g, "")).join("");
+
+    if (/\(\s*teks\s*\)/i.test(fullText)) {
+      if (replacementIndex === 0) {
+        replacementIndex++;
+
+        const pPrMatch = pBlock.match(/<a:pPr\b[\s\S]*?<\/a:pPr>/i);
+        const pPrXml = pPrMatch ? pPrMatch[0] : "";
+
+        const rPrMatch = pBlock.match(/<a:rPr\b[\s\S]*?<\/a:rPr>/i);
+        let rPrBoldXml = rPrMatch
+          ? rPrMatch[0]
+          : '<a:rPr lang="en-US" sz="4800" b="1"/>';
+
+        if (!/b="1"/i.test(rPrBoldXml)) {
+          rPrBoldXml = rPrBoldXml.replace(/<a:rPr/i, '<a:rPr b="1"');
+        }
+
+        const rPrUnboldXml = rPrBoldXml
+          .replace(/\bb="1"/gi, 'b="0"')
+          .replace(/\bb="true"/gi, 'b="0"');
+
+        if (title && body) {
+          const titleParagraph = `<a:p>${pPrXml}<a:r>${rPrBoldXml}<a:t>${escapeXml(title)}</a:t></a:r></a:p>`;
+          const bodyParagraph = `<a:p>${pPrXml}<a:r>${rPrUnboldXml}<a:t>${escapeXml(body)}</a:t></a:r></a:p>`;
+          return `${titleParagraph}${bodyParagraph}`;
+        } else {
+          const singleText = title || body || "";
+          return `<a:p>${pPrXml}<a:r>${rPrBoldXml}<a:t>${escapeXml(singleText)}</a:t></a:r></a:p>`;
+        }
+      } else if (replacementIndex === 1) {
+        replacementIndex++;
+        const responseText = response ? `U\t${response}` : "";
+
+        let isFirstT = true;
+        return pBlock.replace(/<a:t([^>]*)>(.*?)<\/a:t>/g, (tBlock, attrs) => {
+          if (isFirstT) {
+            isFirstT = false;
+            return `<a:t${attrs}>${escapeXml(responseText)}</a:t>`;
+          }
+          return `<a:t${attrs}></a:t>`;
+        });
+      }
+    }
+
+    return pBlock;
+  });
+}
+
 // ponytail: helper to structurally remove all intro paragraphs appearing BEFORE the (teks) placeholder in txBody
 function stripIntroParagraphs(slideXml: string): string {
   return slideXml.replace(/<p:txBody>[\s\S]*?<\/p:txBody>/g, (txBodyBlock) => {
@@ -374,6 +434,10 @@ export async function generatePPTXBuffer(
   let hasHandledMazmur = false;
   let hasPassedBacaanPertama = false;
   let hasPassedBacaanKedua = false;
+  let hasPassedDoaUmatTitle = false;
+  let hasHandledDoaUmatIntro = false;
+  let hasHandledDoaUmatIntentions = false;
+  let hasHandledDoaUmatOutro = false;
 
   // ponytail: process each slide placeholder using Content Slide filtering + Content Pattern Anchors (ZERO slide index dependency)
   for (const slide of slideOrder) {
@@ -381,10 +445,6 @@ export async function generatePPTXBuffer(
     if (!slideZip) continue;
 
     let slideXml = await slideZip.async("text");
-
-    // Only process content slides that actually contain a (teks) placeholder
-    const hasPlaceholder = slideHasPlaceholder(slideXml);
-    if (!hasPlaceholder) continue;
 
     // Extract visible slide text to anchor slide type by internal text/placeholder content
     const pMatches = slideXml.match(/<a:p>[\s\S]*?<\/a:p>/g) || [];
@@ -395,6 +455,19 @@ export async function generatePPTXBuffer(
       })
       .join(" ")
       .toUpperCase();
+
+    // Check if slide is Doa Umat Title slide (Slide 62: DOA UMAT (umat berdiri))
+    if (
+      !hasPassedDoaUmatTitle &&
+      slideTextUpper.includes("DOA UMAT") &&
+      !slideTextUpper.includes("AMIN")
+    ) {
+      hasPassedDoaUmatTitle = true;
+    }
+
+    // Only process content slides that actually contain a (teks) placeholder
+    const hasPlaceholder = slideHasPlaceholder(slideXml);
+    if (!hasPlaceholder) continue;
 
     // Skip song lyrics and announcement slides by content pattern
     if (
@@ -571,58 +644,74 @@ export async function generatePPTXBuffer(
       }
     }
 
-    // 8. Doa Umat Intentions Content Slide (Slide with 2 placeholders)
-    else if (
-      pMatches.length >= 2 &&
-      pMatches.filter((p) => /\(\s*teks\s*\)/i.test(p)).length >= 2
-    ) {
-      const originalSlideXml = slideXml;
-      const intentions = mappedData.doaUmat?.intentions || [];
-      const title0 = intentions[0]?.title || "";
-      const body0 = intentions[0]?.body || "";
-      const filledSlide69Xml = replacePlaceholdersInXml(originalSlideXml, [
-        title0,
-        body0,
-      ]);
-      zip.file(slide.fileName, filledSlide69Xml);
-
-      if (intentions.length > 1) {
-        let lastRId = slide.rId;
-        for (let i = 1; i < intentions.length; i++) {
-          const filledIntentionXml = replacePlaceholdersInXml(
-            originalSlideXml,
-            [intentions[i].title, intentions[i].body],
-          );
-          const { newRId } = await duplicateSlide(
-            slide.fileName,
-            lastRId,
-            filledIntentionXml,
-          );
-          lastRId = newRId;
-        }
-      }
-    }
-
-    // 9. Doa Umat Intro
-    else if (
-      slideTextUpper.includes("DOA UMAT") &&
-      !slideTextUpper.includes("AMIN")
-    ) {
+    // 8. Doa Umat Intro Slide (Slide 63: right after DOA UMAT title slide with 1 placeholder)
+    else if (hasPassedDoaUmatTitle && !hasHandledDoaUmatIntro) {
       slideXml = replacePlaceholdersInXml(slideXml, [
         mappedData.doaUmat?.intro || "",
       ]);
       zip.file(slide.fileName, slideXml);
+      hasHandledDoaUmatIntro = true;
     }
 
-    // 10. Doa Umat Closing
+    // 9. Doa Umat Intentions Content Slide (Slide 64: 2 placeholders - Placeholder 1 = Bold Title & Unbold Body (\n), Placeholder 2 = Yellow Italic Response)
     else if (
-      slideTextUpper.includes("DOA UMAT") &&
-      slideTextUpper.includes("AMIN")
+      hasPassedDoaUmatTitle &&
+      hasHandledDoaUmatIntro &&
+      !hasHandledDoaUmatIntentions
+    ) {
+      const originalSlideXml = slideXml;
+      const intentions = mappedData.doaUmat?.intentions || [];
+
+      if (intentions.length > 0) {
+        const item0 = intentions[0];
+        const filledSlide64Xml = replaceDoaUmatIntentionInXml(
+          originalSlideXml,
+          item0.title,
+          item0.body,
+          item0.response,
+        );
+        zip.file(slide.fileName, filledSlide64Xml);
+
+        if (intentions.length > 1) {
+          let lastRId = slide.rId;
+          for (let i = 1; i < intentions.length; i++) {
+            const item = intentions[i];
+            const filledIntentionXml = replaceDoaUmatIntentionInXml(
+              originalSlideXml,
+              item.title,
+              item.body,
+              item.response,
+            );
+            const { newRId } = await duplicateSlide(
+              slide.fileName,
+              lastRId,
+              filledIntentionXml,
+            );
+            lastRId = newRId;
+          }
+        }
+      } else {
+        const clearedSlideXml = replacePlaceholdersInXml(originalSlideXml, [
+          "",
+          "",
+        ]);
+        zip.file(slide.fileName, clearedSlideXml);
+      }
+      hasHandledDoaUmatIntentions = true;
+    }
+
+    // 10. Doa Umat Outro / Penutup Slide (Slide 66: U Amin. & 1 placeholder)
+    else if (
+      hasPassedDoaUmatTitle &&
+      hasHandledDoaUmatIntentions &&
+      !hasHandledDoaUmatOutro
     ) {
       slideXml = replacePlaceholdersInXml(slideXml, [
         mappedData.doaUmat?.closing || "",
       ]);
       zip.file(slide.fileName, slideXml);
+      hasHandledDoaUmatOutro = true;
+      hasPassedDoaUmatTitle = false;
     }
 
     // 11. Doa Atas Persembahan Content Slide
