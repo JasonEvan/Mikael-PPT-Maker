@@ -24,12 +24,20 @@ function formatEpigraph(epigraph?: string): string {
   return `“${trimmed}”`;
 }
 
-// ponytail: helper to strip leading L / I / L. / I. / L- / L.  / LBacaan prefix from reading citations
+// ponytail: helper to strip leading L / I / L. / I. / Inilah / nilah prefix from reading citations
 function cleanCitation(citation?: string): string {
   if (!citation) return "";
   let cleaned = citation.trim();
-  cleaned = cleaned.replace(/^[LI][.:\s-]*/i, "").trim();
-  return cleaned;
+
+  // Strip "Inilah " or "I. Inilah " or "nilah " from Injil citations
+  cleaned = cleaned.replace(/^([LI][.:\s-]*)?Inilah\s+/i, "");
+  cleaned = cleaned.replace(/^nilah\s+/i, "");
+
+  // Strip speaker prefix (L. / I. / L / I) if followed by punctuation, space, OR uppercase word like Bacaan/Inilah
+  cleaned = cleaned.replace(/^[LI][.:\s-]+/i, "");
+  cleaned = cleaned.replace(/^[LI](?=Bacaan|Inilah)/i, "");
+
+  return cleaned.trim();
 }
 
 // ponytail: helper to check if a slide XML contains a (teks) placeholder

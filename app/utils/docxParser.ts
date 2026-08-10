@@ -19,14 +19,7 @@ export interface LiturgyParagraph {
 export interface ParsedLiturgySection {
   id: string;
   title: string;
-  type:
-    | "major_header"
-    | "sub_header"
-    | "reading"
-    | "psalm"
-    | "prayer"
-    | "doa_umat"
-    | "generic";
+  type: "major_header" | "sub_header" | "reading" | "psalm" | "prayer" | "doa_umat" | "generic";
   epigraph?: string;
   citation?: string;
   body?: string[];
@@ -84,10 +77,7 @@ function toArray<T>(val: T | T[] | undefined | null): T[] {
 function getHeadingTitleText(p: LiturgyParagraph): string | null {
   const titleRuns = p.runs.filter((r) => r.bold && !r.italic);
   if (titleRuns.length === 0) return null;
-  const titleText = titleRuns
-    .map((r) => r.text)
-    .join("")
-    .trim();
+  const titleText = titleRuns.map((r) => r.text).join("").trim();
   return titleText.length > 0 ? titleText : null;
 }
 
@@ -117,12 +107,7 @@ function isGospelDialogueLine(text: string): boolean {
 
 // ponytail: helper to clean reading notes body text (excluding header, epigraph, citation, dialogue greetings, Demikianlah sabda Tuhan, U Syukur kepada Allah)
 function cleanReadingNotesBody(lines: string[], epigraph?: string): string {
-  const normEpigraph = epigraph
-    ? epigraph
-        .replace(/^[*"“']|["”'*]$/g, "")
-        .trim()
-        .toLowerCase()
-    : "";
+  const normEpigraph = epigraph ? epigraph.replace(/^[*"“']|["”'*]$/g, "").trim().toLowerCase() : "";
 
   const filtered = lines.filter((line) => {
     const trimmed = line.trim();
@@ -137,19 +122,14 @@ function cleanReadingNotesBody(lines: string[], epigraph?: string): string {
     if (isGospelDialogueLine(trimmed)) return false;
 
     // Filter out epigraph matching lines
-    if (
-      normEpigraph &&
-      (trimmed.toLowerCase().includes(normEpigraph) ||
-        normEpigraph.includes(trimmed.toLowerCase()))
-    ) {
+    if (normEpigraph && (trimmed.toLowerCase().includes(normEpigraph) || normEpigraph.includes(trimmed.toLowerCase()))) {
       return false;
     }
 
     // Filter out closing responses
     if (/^demikianlah\s*(sabda|injil)/i.test(trimmed)) return false;
     if (/^U[\s.]*(syukur|terpujilah)/i.test(trimmed)) return false;
-    if (/^(syukur kepada allah|terpujilah kristus)\.?$/i.test(trimmed))
-      return false;
+    if (/^(syukur kepada allah|terpujilah kristus)\.?$/i.test(trimmed)) return false;
 
     return true;
   });
@@ -157,28 +137,15 @@ function cleanReadingNotesBody(lines: string[], epigraph?: string): string {
 }
 
 // ponytail: helper to check if paragraph is a scripture reading citation line (defining source)
-function isReadingCitationLine(
-  p: LiturgyParagraph,
-  headingTitle: string | null,
-): boolean {
+function isReadingCitationLine(p: LiturgyParagraph, headingTitle: string | null): boolean {
   const text = (headingTitle || p.rawText).trim();
 
   // If it's a greeting dialogue line (e.g. "I. Tuhan bersamamu"), it is NOT a citation line!
   if (isGospelDialogueLine(text)) return false;
 
   // Scripture source keywords (e.g. "Inilah Injil", "Bacaan dari", "Matius", "Markus", "Lukas", "Yohanes", "Kitab", "Surat")
-  if (
-    /bacaan dari|inilah injil|injil suci|kitab|surat|kisah|warta|nubuat|petikan/i.test(
-      text,
-    )
-  )
-    return true;
-  if (
-    /^[LI][.:\s-]*(bacaan|inilah|kitab|surat|kisah|warta|nubuat|petikan)/i.test(
-      text,
-    )
-  )
-    return true;
+  if (/bacaan dari|inilah injil|injil suci|kitab|surat|kisah|warta|nubuat|petikan/i.test(text)) return true;
+  if (/^[LI][.:\s-]*(bacaan|inilah|kitab|surat|kisah|warta|nubuat|petikan)/i.test(text)) return true;
 
   return false;
 }
@@ -190,9 +157,7 @@ export async function parseDocxFile(file: File): Promise<DocxParseResult> {
 
   const documentXmlFile = zip.file("word/document.xml");
   if (!documentXmlFile) {
-    throw new Error(
-      "Berkas .docx tidak valid: word/document.xml tidak ditemukan.",
-    );
+    throw new Error("Berkas .docx tidak valid: word/document.xml tidak ditemukan.");
   }
 
   const xmlContent = await documentXmlFile.async("text");
@@ -225,10 +190,10 @@ export async function parseDocxFile(file: File): Promise<DocxParseResult> {
       // Check formatting tags
       const hasBold = Boolean(
         rPr &&
-        ("w:b" in rPr ||
-          rPr["w:b"]?.["@_w:val"] === "true" ||
-          rPr["w:b"]?.["@_w:val"] === "1" ||
-          rPr["w:b"] === ""),
+          ("w:b" in rPr ||
+            rPr["w:b"]?.["@_w:val"] === "true" ||
+            rPr["w:b"]?.["@_w:val"] === "1" ||
+            rPr["w:b"] === "")
       );
 
       // Underline detection logic
@@ -237,10 +202,10 @@ export async function parseDocxFile(file: File): Promise<DocxParseResult> {
 
       const hasItalic = Boolean(
         rPr &&
-        ("w:i" in rPr ||
-          rPr["w:i"]?.["@_w:val"] === "true" ||
-          rPr["w:i"]?.["@_w:val"] === "1" ||
-          rPr["w:i"] === ""),
+          ("w:i" in rPr ||
+            rPr["w:i"]?.["@_w:val"] === "true" ||
+            rPr["w:i"]?.["@_w:val"] === "1" ||
+            rPr["w:i"] === "")
       );
 
       // Extract text
@@ -248,10 +213,7 @@ export async function parseDocxFile(file: File): Promise<DocxParseResult> {
       if (rNode["w:t"]) {
         if (typeof rNode["w:t"] === "string") {
           text = rNode["w:t"];
-        } else if (
-          typeof rNode["w:t"] === "object" &&
-          "#text" in rNode["w:t"]
-        ) {
+        } else if (typeof rNode["w:t"] === "object" && "#text" in rNode["w:t"]) {
           text = rNode["w:t"]["#text"];
         }
       } else if (rNode["w:tab"]) {
@@ -274,9 +236,7 @@ export async function parseDocxFile(file: File): Promise<DocxParseResult> {
 
     // ponytail: check if paragraph uses Word auto-numbering (w:numPr)
     const pPr = pNode["w:pPr"];
-    const hasNumPr = Boolean(
-      pPr && ("w:numPr" in pPr || "w:outlineLvl" in pPr),
-    );
+    const hasNumPr = Boolean(pPr && ("w:numPr" in pPr || "w:outlineLvl" in pPr));
 
     // ponytail: strip Word auto-numbering prefixes if numPr present or if fused like "1.HARI"
     if (hasNumPr || /^\d+\.[A-Za-z\u00C0-\u024F]/.test(rawText.trim())) {
@@ -365,15 +325,9 @@ function groupIntoSections(
 
       const titleUpper = headingTitle.toUpperCase();
       let type: ParsedLiturgySection["type"] = "sub_header";
-      if (
-        titleUpper.includes("BAIT PENGANTAR") ||
-        titleUpper.includes("ALLELUIA")
-      ) {
+      if (titleUpper.includes("BAIT PENGANTAR") || titleUpper.includes("ALLELUIA")) {
         type = "sub_header";
-      } else if (
-        titleUpper.includes("BACAAN") ||
-        titleUpper.includes("INJIL")
-      ) {
+      } else if (titleUpper.includes("BACAAN") || titleUpper.includes("INJIL")) {
         type = "reading";
       } else if (titleUpper.includes("MAZMUR")) {
         type = "psalm";
@@ -419,9 +373,7 @@ function groupIntoSections(
 }
 
 // ponytail: extract reading epigraphs (multi-paragraph), citations, and Doa Umat intentions
-function processSectionDetails(
-  section: ParsedLiturgySection,
-): ParsedLiturgySection {
+function processSectionDetails(section: ParsedLiturgySection): ParsedLiturgySection {
   const result = { ...section };
 
   if (section.type === "reading") {
@@ -445,11 +397,11 @@ function processSectionDetails(
       if (
         p.isItalic ||
         p.rawText.startsWith('"') ||
-        p.rawText.startsWith("“") ||
+        p.rawText.startsWith('“') ||
         p.rawText.startsWith('*"') ||
-        p.rawText.startsWith("*“") ||
+        p.rawText.startsWith('*“') ||
         p.rawText.endsWith('"') ||
-        p.rawText.endsWith("”")
+        p.rawText.endsWith('”')
       ) {
         epigraphLines.push(p.rawText.replace(/^[*"“']|["”'*]$/g, "").trim());
         epigraphParagraphs.push(p);
@@ -466,11 +418,15 @@ function processSectionDetails(
         p.isBold &&
         (isReadingCitationLine(p, getHeadingTitleText(p)) ||
           p.rawText.includes("Bacaan dari") ||
-          p.rawText.includes("Inilah Injil")),
+          p.rawText.includes("Inilah Injil"))
     );
     if (citationP) {
-      // Strip leading L or I speaker prefix (even if fused like LBacaan or IInilah)
-      result.citation = citationP.rawText.replace(/^[LI][.:\s-]*/i, "").trim();
+      let rawCitation = citationP.rawText.trim();
+      rawCitation = rawCitation.replace(/^([LI][.:\s-]*)?Inilah\s+/i, "");
+      rawCitation = rawCitation.replace(/^nilah\s+/i, "");
+      rawCitation = rawCitation.replace(/^[LI][.:\s-]+/i, "");
+      rawCitation = rawCitation.replace(/^[LI](?=Bacaan|Inilah)/i, "");
+      result.citation = rawCitation.trim();
     }
 
     // Notes body is full text excluding header, epigraph paragraphs, citation line, dialogue greetings, and Demikianlah sabda Tuhan / U Syukur kepada Allah
@@ -479,7 +435,7 @@ function processSectionDetails(
         (p) =>
           !epigraphParagraphs.includes(p) &&
           p !== citationP &&
-          p.rawText !== section.title,
+          p.rawText !== section.title
       )
       .map((p) => p.rawText);
     result.notesBody = cleanReadingNotesBody(rawBodyLines, result.epigraph);
@@ -513,9 +469,7 @@ function processSectionDetails(
 }
 
 // ponytail: select & map parsed sections to MVP target placeholders, tracking unmatched sections
-export function selectRelevantSections(
-  parsed: DocxParseResult,
-): MappedLiturgyData {
+export function selectRelevantSections(parsed: DocxParseResult): MappedLiturgyData {
   const mappedSectionIds = new Set<string>();
   const mappedData: MappedLiturgyData = {
     unmatchedSections: [],
@@ -525,10 +479,7 @@ export function selectRelevantSections(
     const titleNorm = sec.title.toUpperCase();
 
     // 1. Seruan Tobat
-    if (
-      titleNorm.includes("SERUAN TOBAT") ||
-      (titleNorm.includes("TOBAT") && !mappedData.seruanTobat)
-    ) {
+    if (titleNorm.includes("SERUAN TOBAT") || (titleNorm.includes("TOBAT") && !mappedData.seruanTobat)) {
       const lines = sec.body?.filter((b) => b !== sec.title) || [];
       mappedData.seruanTobat = lines.slice(0, 3);
       mappedSectionIds.add(sec.id);
@@ -536,10 +487,7 @@ export function selectRelevantSections(
     }
 
     // 2. Doa Kolekta (clean formula lines)
-    if (
-      titleNorm.includes("DOA KOLEKTA") ||
-      (titleNorm.includes("KOLEKTA") && !mappedData.doaKolekta)
-    ) {
+    if (titleNorm.includes("DOA KOLEKTA") || (titleNorm.includes("KOLEKTA") && !mappedData.doaKolekta)) {
       const lines = sec.body?.filter((b) => b !== sec.title) || [];
       mappedData.doaKolekta = cleanPrayerBody(lines);
       mappedSectionIds.add(sec.id);
@@ -550,8 +498,7 @@ export function selectRelevantSections(
     if (
       (titleNorm.includes("BACAAN PERTAMA") ||
         titleNorm.includes("BACAAN I") ||
-        (titleNorm.includes("BACAAN") &&
-          (titleNorm.includes("PERTAMA") || titleNorm.includes(" 1")))) &&
+        (titleNorm.includes("BACAAN") && (titleNorm.includes("PERTAMA") || titleNorm.includes(" 1")))) &&
       !titleNorm.includes("KEDUA") &&
       !titleNorm.includes(" II") &&
       !mappedData.bacaanPertama
@@ -568,9 +515,7 @@ export function selectRelevantSections(
     // 4. Mazmur Tanggapan
     if (titleNorm.includes("MAZMUR") && !mappedData.mazmurTanggapan) {
       const verses: string[] = [];
-      const nonHeaderParagraphs = sec.paragraphs.filter(
-        (p) => p.rawText !== sec.title,
-      );
+      const nonHeaderParagraphs = sec.paragraphs.filter((p) => p.rawText !== sec.title);
       let currentVerse = "";
 
       for (const p of nonHeaderParagraphs) {
@@ -596,8 +541,7 @@ export function selectRelevantSections(
     if (
       (titleNorm.includes("BACAAN KEDUA") ||
         titleNorm.includes("BACAAN II") ||
-        (titleNorm.includes("BACAAN") &&
-          (titleNorm.includes("KEDUA") || titleNorm.includes(" 2")))) &&
+        (titleNorm.includes("BACAAN") && (titleNorm.includes("KEDUA") || titleNorm.includes(" 2")))) &&
       !mappedData.bacaanKedua
     ) {
       mappedData.bacaanKedua = {
@@ -617,9 +561,7 @@ export function selectRelevantSections(
       !mappedData.bacaanInjil
     ) {
       let gospelName = "";
-      const match = sec.citation?.match(
-        /(Matius|Markus|Lukas|Yohanes)\s+\d+:[0-9a-z.-]+/i,
-      );
+      const match = sec.citation?.match(/(Matius|Markus|Lukas|Yohanes)\s+\d+:[0-9a-z.-]+/i);
       if (match) {
         gospelName = match[0];
       } else if (sec.citation) {
@@ -638,15 +580,9 @@ export function selectRelevantSections(
 
     // 7. Doa Umat
     if (titleNorm.includes("DOA UMAT") && !mappedData.doaUmat) {
-      const nonHeaderParagraphs = sec.paragraphs.filter(
-        (p) => p.rawText !== sec.title,
-      );
-      const introP = nonHeaderParagraphs.find(
-        (p) => !p.isBold || !/^L[\s.]/i.test(p.rawText),
-      );
-      const closingP = nonHeaderParagraphs
-        .slice(-1)
-        .find((p) => !/^L[\s.]/i.test(p.rawText) && p !== introP);
+      const nonHeaderParagraphs = sec.paragraphs.filter((p) => p.rawText !== sec.title);
+      const introP = nonHeaderParagraphs.find((p) => !p.isBold || !/^L[\s.]/i.test(p.rawText));
+      const closingP = nonHeaderParagraphs.slice(-1).find((p) => !/^L[\s.]/i.test(p.rawText) && p !== introP);
 
       mappedData.doaUmat = {
         intro: introP?.rawText,
@@ -659,8 +595,7 @@ export function selectRelevantSections(
 
     // 8. Doa Atas Persembahan (clean formula lines)
     if (
-      (titleNorm.includes("DOA ATAS PERSEMBAHAN") ||
-        titleNorm.includes("ATAS PERSEMBAHAN")) &&
+      (titleNorm.includes("DOA ATAS PERSEMBAHAN") || titleNorm.includes("ATAS PERSEMBAHAN")) &&
       !mappedData.doaAtasPersembahan
     ) {
       const lines = sec.body?.filter((b) => b !== sec.title) || [];
@@ -671,8 +606,7 @@ export function selectRelevantSections(
 
     // 9. Doa Sesudah Komuni (clean formula lines)
     if (
-      (titleNorm.includes("DOA SESUDAH KOMUNI") ||
-        titleNorm.includes("SESUDAH KOMUNI")) &&
+      (titleNorm.includes("DOA SESUDAH KOMUNI") || titleNorm.includes("SESUDAH KOMUNI")) &&
       !mappedData.doaSesudahKomuni
     ) {
       const lines = sec.body?.filter((b) => b !== sec.title) || [];
