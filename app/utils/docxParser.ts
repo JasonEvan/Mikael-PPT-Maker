@@ -205,7 +205,7 @@ function isKnownLiturgySectionHeader(title: string): boolean {
   );
 }
 
-// ponytail: helper to parse Doa Umat intro & intentions dynamically for any section matching "DOA UMAT"
+// ponytail: helper to parse Doa Umat intro, intentions, and true priest conclusion outro
 function parseDoaUmatData(section: ParsedLiturgySection): MappedDoaUmat {
   const validParagraphs = section.paragraphs.filter((p) => {
     const text = p.rawText.trim();
@@ -216,7 +216,7 @@ function parseDoaUmatData(section: ParsedLiturgySection): MappedDoaUmat {
   });
 
   if (validParagraphs.length === 0) {
-    return { intro: "", intentions: [] };
+    return { intro: "", intentions: [], closing: "" };
   }
 
   // 1. Intro: First text starting with "I" / "Imam" or validParagraphs[0]
@@ -227,8 +227,10 @@ function parseDoaUmatData(section: ParsedLiturgySection): MappedDoaUmat {
     }) || validParagraphs[0];
   const intro = introP ? stripSpeakerPrefix(introP.rawText) : "";
 
-  // 2. Intentions: Process all valid paragraphs after introP
+  // 2. Intentions & Outro: Process all valid paragraphs after introP
   const intentions: { title: string; body: string; response?: string }[] = [];
+  const outroLines: string[] = [];
+  let foundUjub = false;
 
   for (const p of validParagraphs) {
     if (p === introP) continue;
@@ -237,12 +239,28 @@ function parseDoaUmatData(section: ParsedLiturgySection): MappedDoaUmat {
 
     if (isPostureAnnotation(text)) continue;
 
-    // Exclude Doa Ujub / Pribadi marker completely from intentions array
+    // Check if Doa Ujub / Pribadi marker reached
     if (isDoaUjubMarker(text)) {
-      break;
+      foundUjub = true;
+      continue;
     }
 
-    // Capture congregation response line for the current intention
+    if (foundUjub) {
+      const norm = normalizeSpeakerPrefix(text);
+      const isPriestLine = /^I[.:\s\t]/i.test(norm) || /^Imam/i.test(norm);
+
+      if (isPriestLine) {
+        const cleanOutro = stripSpeakerPrefix(text);
+        // Exclude formula prompt lines like "Kami mohon..."
+        if (cleanOutro && !/^kami\s+mohon/i.test(cleanOutro)) {
+          outroLines.push(cleanOutro);
+          break; // Captured the priest conclusion prayer!
+        }
+      }
+      continue;
+    }
+
+    // Skip congregation response lines (matching U / Umat speaker prefix)
     if (isCongregationResponse(text)) {
       const cleanResponse = stripSpeakerPrefix(text);
       if (intentions.length > 0) {
@@ -266,7 +284,11 @@ function parseDoaUmatData(section: ParsedLiturgySection): MappedDoaUmat {
     }
   }
 
-  return { intro, intentions };
+  return {
+    intro,
+    intentions,
+    closing: outroLines.join("\n\n").trim(),
+  };
 }
 
 // ponytail: helper to clean reading notes body text (excluding header, epigraph, citation, dialogue greetings, Demikianlah sabda Tuhan, U Syukur kepada Allah)
