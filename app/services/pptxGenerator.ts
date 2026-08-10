@@ -297,6 +297,40 @@ function splitTextIntoSlideChunks(
   return chunks.length > 0 ? chunks : [trimmed];
 }
 
+// ponytail: helper to generically split off the last sentence by punctuation boundary to accompany the congregation response on an overflow slide (ZERO hardcoded words)
+function splitLastSentence(bodyText: string): {
+  mainBody: string;
+  lastSentence: string;
+} {
+  const trimmed = bodyText.trim();
+  if (trimmed.length === 0) return { mainBody: "", lastSentence: "" };
+
+  // Strip trailing punctuation when searching for the sentence break point
+  const searchSlice = trimmed.replace(/[.,!?;…]+$/, "").trim();
+
+  let lastPunctIdx = -1;
+  const delimiters = [". ", "! ", "? ", "; ", "… ", "…", "\n"];
+
+  for (const delim of delimiters) {
+    const idx = searchSlice.lastIndexOf(delim);
+    if (idx > lastPunctIdx) {
+      lastPunctIdx = idx;
+    }
+  }
+
+  if (lastPunctIdx > 0 && lastPunctIdx > Math.floor(trimmed.length * 0.35)) {
+    const cutIndex = lastPunctIdx + 1;
+    const mainBody = trimmed.slice(0, cutIndex).trim();
+    const lastSentence = trimmed.slice(cutIndex).trim();
+
+    if (mainBody.length > 0 && lastSentence.length > 0) {
+      return { mainBody, lastSentence };
+    }
+  }
+
+  return { mainBody: trimmed, lastSentence: "" };
+}
+
 // ponytail: generate filled PPTX from template and MappedLiturgyData
 export async function generatePPTXBuffer(
   mappedData: MappedLiturgyData,
@@ -726,35 +760,101 @@ export async function generatePPTXBuffer(
           let isFirstSlide = true;
           let lastRId = slide.rId;
 
+          const maxCombinedLimit = 250;
+
           for (let i = 0; i < intentions.length; i++) {
             const item = intentions[i];
             const bodyChunks = splitTextIntoSlideChunks(item.body || "", 260);
 
             for (let c = 0; c < bodyChunks.length; c++) {
               const bodyChunk = bodyChunks[c];
-              const isLastChunk = c === bodyChunks.length - 1;
-              const resp = isLastChunk ? item.response : "";
-
-              // Only include title on the 1st chunk slide for this intention
+              const isLastBodyChunk = c === bodyChunks.length - 1;
               const intentionTitle = c === 0 ? item.title : "";
+              const responseText = item.response ? item.response : "";
 
-              const filledIntentionXml = replaceDoaUmatIntentionInXml(
-                originalSlideXml,
-                intentionTitle,
-                bodyChunk,
-                resp,
-              );
+              if (isLastBodyChunk) {
+                // Check if bodyChunk + responseText exceeds visual height (maxCombinedLimit)
+                if (
+                  responseText &&
+                  bodyChunk.length + responseText.length > maxCombinedLimit
+                ) {
+                  const { mainBody, lastSentence } =
+                    splitLastSentence(bodyChunk);
 
-              if (isFirstSlide) {
-                zip.file(slide.fileName, filledIntentionXml);
-                isFirstSlide = false;
+                  // Slide 1: Main body chunk (without last sentence / Kami mohon)
+                  const filledIntentionXml1 = replaceDoaUmatIntentionInXml(
+                    originalSlideXml,
+                    intentionTitle,
+                    mainBody,
+                    "",
+                  );
+
+                  if (isFirstSlide) {
+                    zip.file(slide.fileName, filledIntentionXml1);
+                    isFirstSlide = false;
+                  } else {
+                    const { newRId } = await duplicateSlide(
+                      slide.fileName,
+                      lastRId,
+                      filledIntentionXml1,
+                    );
+                    lastRId = newRId;
+                  }
+
+                  // Slide 2: Duplicated slide for Last Sentence ("Kami mohon ...") + Response!
+                  const filledResponseXml = replaceDoaUmatIntentionInXml(
+                    originalSlideXml,
+                    "",
+                    lastSentence,
+                    responseText,
+                  );
+                  const { newRId } = await duplicateSlide(
+                    slide.fileName,
+                    lastRId,
+                    filledResponseXml,
+                  );
+                  lastRId = newRId;
+                } else {
+                  // Both bodyChunk & responseText fit on current slide
+                  const filledIntentionXml = replaceDoaUmatIntentionInXml(
+                    originalSlideXml,
+                    intentionTitle,
+                    bodyChunk,
+                    responseText,
+                  );
+
+                  if (isFirstSlide) {
+                    zip.file(slide.fileName, filledIntentionXml);
+                    isFirstSlide = false;
+                  } else {
+                    const { newRId } = await duplicateSlide(
+                      slide.fileName,
+                      lastRId,
+                      filledIntentionXml,
+                    );
+                    lastRId = newRId;
+                  }
+                }
               } else {
-                const { newRId } = await duplicateSlide(
-                  slide.fileName,
-                  lastRId,
-                  filledIntentionXml,
+                // Non-last body chunk (no response)
+                const filledIntentionXml = replaceDoaUmatIntentionInXml(
+                  originalSlideXml,
+                  intentionTitle,
+                  bodyChunk,
+                  "",
                 );
-                lastRId = newRId;
+
+                if (isFirstSlide) {
+                  zip.file(slide.fileName, filledIntentionXml);
+                  isFirstSlide = false;
+                } else {
+                  const { newRId } = await duplicateSlide(
+                    slide.fileName,
+                    lastRId,
+                    filledIntentionXml,
+                  );
+                  lastRId = newRId;
+                }
               }
             }
           }
