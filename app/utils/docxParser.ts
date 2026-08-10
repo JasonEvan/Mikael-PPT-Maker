@@ -31,7 +31,7 @@ export interface ParsedLiturgySection {
   citation?: string;
   body?: string[];
   notesBody?: string;
-  intentions?: { title: string; body: string }[];
+  intentions?: { title: string; body: string; response?: string }[];
   paragraphs: LiturgyParagraph[];
 }
 
@@ -57,7 +57,7 @@ export interface MappedGospel {
 
 export interface MappedDoaUmat {
   intro?: string;
-  intentions: { title: string; body: string }[];
+  intentions: { title: string; body: string; response?: string }[];
   closing?: string;
 }
 
@@ -138,6 +138,137 @@ function splitMazmurVerses(cleanParagraphs: LiturgyParagraph[]): string[] {
     .filter((text) => !isMazmurHeaderOrMetadata(text));
 }
 
+// ponytail: normalize all speaker prefix combinations (e.g. "L", "L.", "L. ", "L.\t", "L\t", "L:", "Lektor:", "1.", "1.\t", fused "LBagi")
+function normalizeSpeakerPrefix(text: string): string {
+  if (!text) return "";
+  let norm = text.trim();
+  norm = norm.replace(
+    /^(Lektor|Imam|Umat)[.:\s\t]*/i,
+    (match) => `${match.charAt(0).toUpperCase()}. `,
+  );
+  norm = norm.replace(/^([ILU])([A-Z\u00C0-\u024F])/, "$1. $2");
+  norm = norm.replace(/^([ILU])\.([A-Z\u00C0-\u024F])/i, "$1. $2");
+  norm = norm.replace(/^([ILU])[.:\s\t]+/i, "$1. ");
+  return norm.trim();
+}
+
+// ponytail: helper to strip speaker prefixes (I., L., U., I , L , U , Imam:, Lektor:, Umat:, 1., 1.\t, 1. )
+function stripSpeakerPrefix(text: string): string {
+  if (!text) return "";
+  let norm = normalizeSpeakerPrefix(text);
+  norm = norm.replace(/^(Imam|Lektor|Umat|[ILU])[.:\s\t]*/i, "").trim();
+  norm = norm.replace(/^\d+[.:\s\t]*/, "").trim();
+  return norm;
+}
+
+// ponytail: check if a paragraph is a posture annotation like (umat berdiri)
+function isPostureAnnotation(text: string): boolean {
+  const norm = text.trim();
+  if (/^\(?umat\s*(duduk|berdiri|berlutut)\)?$/i.test(norm)) return true;
+  if (/^doa\s+umat\s*\(?umat\s*(duduk|berdiri|berlutut)\)?$/i.test(norm))
+    return true;
+  return false;
+}
+
+// ponytail: check if a text is a section title for Doa Umat (e.g. "Doa Umat", "Doa Umat (umat berdiri)")
+function isDoaUmatTitle(text: string): boolean {
+  const norm = text.trim();
+  if (/^doa\s+umat/i.test(norm)) return true;
+  return false;
+}
+
+// ponytail: check if a line is a Doa Ujub / Doa Pribadi marker
+function isDoaUjubMarker(text: string): boolean {
+  return /doa\s*(ujub|pribadi)|hening\s*sejenak/i.test(text.trim());
+}
+
+// ponytail: check if a line is a congregation response line matching U or Umat speaker prefix ONLY (zero hardcoded response words)
+function isCongregationResponse(text: string): boolean {
+  const norm = normalizeSpeakerPrefix(text);
+  if (/^U[.:\s\t]/i.test(norm) || /^Umat/i.test(norm)) return true;
+  return false;
+}
+
+// ponytail: check if a heading title is a known liturgy section header that can close Doa Umat
+function isKnownLiturgySectionHeader(title: string): boolean {
+  const upper = title.toUpperCase();
+  return (
+    upper.includes("LITURGI") ||
+    upper.includes("PERSEMBAHAN") ||
+    upper.includes("BACAAN") ||
+    upper.includes("INJIL") ||
+    upper.includes("MAZMUR") ||
+    upper.includes("KOLEKTA") ||
+    upper.includes("TOBAT") ||
+    upper.includes("BAPA KAMI") ||
+    upper.includes("PENGUMUMAN")
+  );
+}
+
+// ponytail: helper to parse Doa Umat intro & intentions dynamically for any section matching "DOA UMAT"
+function parseDoaUmatData(section: ParsedLiturgySection): MappedDoaUmat {
+  const validParagraphs = section.paragraphs.filter((p) => {
+    const text = p.rawText.trim();
+    if (text === section.title.trim()) return false;
+    if (isDoaUmatTitle(text)) return false;
+    if (isPostureAnnotation(text)) return false;
+    return true;
+  });
+
+  if (validParagraphs.length === 0) {
+    return { intro: "", intentions: [] };
+  }
+
+  // 1. Intro: First text starting with "I" / "Imam" or validParagraphs[0]
+  const introP =
+    validParagraphs.find((p) => {
+      const norm = normalizeSpeakerPrefix(p.rawText);
+      return /^I[.:\s\t]/i.test(norm) || /^Imam/i.test(norm);
+    }) || validParagraphs[0];
+  const intro = introP ? stripSpeakerPrefix(introP.rawText) : "";
+
+  // 2. Intentions: Process all valid paragraphs after introP
+  const intentions: { title: string; body: string; response?: string }[] = [];
+
+  for (const p of validParagraphs) {
+    if (p === introP) continue;
+    const text = p.rawText.trim();
+    if (!text) continue;
+
+    if (isPostureAnnotation(text)) continue;
+
+    // Exclude Doa Ujub / Pribadi marker completely from intentions array
+    if (isDoaUjubMarker(text)) {
+      break;
+    }
+
+    // Capture congregation response line for the current intention
+    if (isCongregationResponse(text)) {
+      const cleanResponse = stripSpeakerPrefix(text);
+      if (intentions.length > 0) {
+        intentions[intentions.length - 1].response = cleanResponse;
+      }
+      continue;
+    }
+
+    const cleanText = stripSpeakerPrefix(text);
+    if (!cleanText) continue;
+
+    const firstDotIdx = cleanText.indexOf(".");
+    if (firstDotIdx > 0) {
+      intentions.push({
+        title: cleanText.slice(0, firstDotIdx + 1).trim(),
+        body: cleanText.slice(firstDotIdx + 1).trim(),
+        response: "",
+      });
+    } else {
+      intentions.push({ title: cleanText, body: cleanText, response: "" });
+    }
+  }
+
+  return { intro, intentions };
+}
+
 // ponytail: helper to clean reading notes body text (excluding header, epigraph, citation, dialogue greetings, Demikianlah sabda Tuhan, U Syukur kepada Allah)
 function cleanReadingNotesBody(lines: string[], epigraph?: string): string {
   const normEpigraph = epigraph
@@ -154,7 +285,7 @@ function cleanReadingNotesBody(lines: string[], epigraph?: string): string {
     // Filter out section headers like "Bacaan I(umat duduk)", "Bacaan II", "Injil"
     if (/^bacaan\s*(I|II|pertama|kedua|injil)/i.test(trimmed)) return false;
     if (/^injil/i.test(trimmed)) return false;
-    if (/^\(?umat\s*(duduk|berdiri|berlutut)\)?$/i.test(trimmed)) return false;
+    if (isPostureAnnotation(trimmed)) return false;
 
     // Filter out Gospel dialogue greetings
     if (isGospelDialogueLine(trimmed)) return false;
@@ -197,7 +328,7 @@ function isReadingCitationLine(
   )
     return true;
   if (
-    /^[LI][.:\s-]*(bacaan|inilah|kitab|surat|kisah|warta|nubuat|petikan)/i.test(
+    /^[LI][.:\s\t]*(bacaan|inilah|kitab|surat|kisah|warta|nubuat|petikan)/i.test(
       text,
     )
   )
@@ -278,7 +409,7 @@ export async function parseDocxFile(file: File): Promise<DocxParseResult> {
           text = rNode["w:t"]["#text"];
         }
       } else if (rNode["w:tab"]) {
-        text = " ";
+        text = "\t";
       } else if (rNode["w:br"]) {
         text = "\n";
       }
@@ -308,7 +439,8 @@ export async function parseDocxFile(file: File): Promise<DocxParseResult> {
       rawText = rawText.trim();
     }
 
-    // ponytail: normalize fused speaker labels (e.g. "L.Bacaan" -> "L. Bacaan", "I.Inilah" -> "I. Inilah")
+    // ponytail: normalize fused speaker labels (e.g. "ITuhan" -> "I. Tuhan", "LBagi" -> "L. Bagi", "UKabulkanlah" -> "U. Kabulkanlah")
+    rawText = normalizeSpeakerPrefix(rawText);
     rawText = rawText.replace(/^([LI])\.\s*([A-Za-z])/i, "$1. $2");
     // ponytail: fix fused words like "dariKitab" -> "dari Kitab"
     rawText = rawText.replace(/([a-z])Kitab/g, "$1 Kitab");
@@ -370,8 +502,23 @@ function groupIntoSections(
     const headingTitle = getHeadingTitleText(p);
 
     // ponytail: check if headingTitle is a bare speaker label (e.g. "U", "L.", "I:")
+    const normTitle = headingTitle
+      ? normalizeSpeakerPrefix(headingTitle)
+      : null;
     const isJustSpeakerLabel =
-      headingTitle !== null && /^[ULI][.:]?$/i.test(headingTitle.trim());
+      normTitle !== null && /^[ULI][.:]?$/i.test(normTitle.trim());
+
+    // ponytail: check if paragraph is a speaker line (I, L, U, Imam, Lektor, Umat)
+    const isSpeakerLabelLine =
+      normTitle !== null &&
+      (/^[ILU][.:\s\t]/i.test(normTitle.trim()) ||
+        /^(Imam|Lektor|Umat)[.:\s\t]/i.test(normTitle.trim()));
+
+    // ponytail: check if current section is Doa Umat
+    const isDoaUmatSection =
+      currentSection !== null &&
+      (currentSection.type === "doa_umat" ||
+        currentSection.title.toUpperCase().includes("DOA UMAT"));
 
     // ponytail: check if paragraph is a scripture reading citation line (defining source)
     const isCitationLine = isReadingCitationLine(p, headingTitle);
@@ -379,8 +526,9 @@ function groupIntoSections(
     // 2. Sub-Section Header condition
     const shouldOpenNewSection =
       headingTitle !== null &&
-      headingTitle.length < 80 &&
       !isJustSpeakerLabel &&
+      !isSpeakerLabelLine &&
+      !(isDoaUmatSection && !isKnownLiturgySectionHeader(headingTitle)) &&
       !(currentSection?.type === "reading" && isCitationLine);
 
     if (shouldOpenNewSection) {
@@ -512,28 +660,12 @@ function processSectionDetails(
     result.notesBody = cleanReadingNotesBody(rawBodyLines, result.epigraph);
   }
 
-  if (section.type === "doa_umat") {
-    const intentions: { title: string; body: string }[] = [];
-    let currentTitle = "";
-    let currentBody: string[] = [];
-
-    for (const p of section.paragraphs) {
-      if (p.isBold && /^L[\s.]/i.test(p.rawText)) {
-        if (currentTitle) {
-          intentions.push({ title: currentTitle, body: currentBody.join(" ") });
-        }
-        currentTitle = p.rawText;
-        currentBody = [];
-      } else if (currentTitle) {
-        currentBody.push(p.rawText);
-      }
-    }
-    if (currentTitle) {
-      intentions.push({ title: currentTitle, body: currentBody.join(" ") });
-    }
-    if (intentions.length > 0) {
-      result.intentions = intentions;
-    }
+  if (
+    section.type === "doa_umat" ||
+    section.title.toUpperCase().includes("DOA UMAT")
+  ) {
+    const data = parseDoaUmatData(section);
+    result.intentions = data.intentions;
   }
 
   return result;
@@ -647,23 +779,9 @@ export function selectRelevantSections(
       continue;
     }
 
-    // 7. Doa Umat
+    // 7. Doa Umat (Universal parseDoaUmatData regardless of section header formatting)
     if (titleNorm.includes("DOA UMAT") && !mappedData.doaUmat) {
-      const nonHeaderParagraphs = sec.paragraphs.filter(
-        (p) => p.rawText !== sec.title,
-      );
-      const introP = nonHeaderParagraphs.find(
-        (p) => !p.isBold || !/^L[\s.]/i.test(p.rawText),
-      );
-      const closingP = nonHeaderParagraphs
-        .slice(-1)
-        .find((p) => !/^L[\s.]/i.test(p.rawText) && p !== introP);
-
-      mappedData.doaUmat = {
-        intro: introP?.rawText,
-        intentions: sec.intentions || [],
-        closing: closingP?.rawText,
-      };
+      mappedData.doaUmat = parseDoaUmatData(sec);
       mappedSectionIds.add(sec.id);
       continue;
     }

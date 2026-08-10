@@ -636,9 +636,8 @@ export default function DocxViewer({ parseResult, onReset }: DocxViewerProps) {
               {matchesSearch("Doa Umat", [
                 mappedData.doaUmat?.intro || "",
                 ...(mappedData.doaUmat?.intentions.map(
-                  (i) => i.title + " " + i.body,
+                  (i) => i.title + " " + i.body + " " + (i.response || ""),
                 ) || []),
-                mappedData.doaUmat?.closing || "",
               ]) && (
                 <div className="bg-black bg-opacity-30 rounded-3 p-3 border border-secondary-subtle">
                   <div className="d-flex align-items-center justify-content-between mb-2">
@@ -678,14 +677,14 @@ export default function DocxViewer({ parseResult, onReset }: DocxViewerProps) {
                             {item.title}
                           </strong>
                           <span>{item.body}</span>
+                          {item.response && (
+                            <div className="mt-2 pt-1 border-top border-secondary-subtle small fst-italic" style={{ color: "#94a3b8" }}>
+                              <span className="fw-semibold text-info me-1">U:</span>
+                              {item.response}
+                            </div>
+                          )}
                         </div>
                       ))}
-                      {mappedData.doaUmat.closing && (
-                        <p className="mb-0 mt-1" style={{ color: "#cbd5e1" }}>
-                          <strong className="text-white">Penutup:</strong>{" "}
-                          {mappedData.doaUmat.closing}
-                        </p>
-                      )}
                     </div>
                   ) : (
                     <p
