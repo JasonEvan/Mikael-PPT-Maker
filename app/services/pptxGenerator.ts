@@ -256,16 +256,14 @@ export async function generatePPTXBuffer(
   }
 
   const sldMatches = presentationXml.matchAll(/<p:sldId [^>]*r:id="([^"]+)"/g);
-  const slideOrder: { index: number; rId: string; fileName: string }[] = [];
-  let idx = 1;
+  const slideOrder: { rId: string; fileName: string }[] = [];
 
   for (const m of sldMatches) {
     const rId = m[1];
     const target = rIdMap[rId];
     if (target) {
       const fileName = target.startsWith("ppt/") ? target : `ppt/${target}`;
-      slideOrder.push({ index: idx, rId, fileName });
-      idx++;
+      slideOrder.push({ rId, fileName });
     }
   }
 
@@ -363,20 +361,14 @@ export async function generatePPTXBuffer(
     return { newSlideNum, newFileName, newRId };
   };
 
-  // ponytail: process each slide placeholder using Content Slide filtering + Heading Text Anchors
+  // Tracking section states dynamically across content slides
+  let seruanCount = 0;
+  let mazmurCount = 0;
+  let hasPassedBacaanPertama = false;
+  let hasPassedBacaanKedua = false;
+
+  // ponytail: process each slide placeholder using Content Slide filtering + Content Pattern Anchors (ZERO slide index dependency)
   for (const slide of slideOrder) {
-    const sNum = slide.index;
-
-    // Skip slides 74, 95, 117 (song lyrics) & slides 102–112 (announcements)
-    if (
-      sNum === 74 ||
-      sNum === 95 ||
-      sNum === 117 ||
-      (sNum >= 102 && sNum <= 112)
-    ) {
-      continue;
-    }
-
     const slideZip = zip.file(slide.fileName);
     if (!slideZip) continue;
 
@@ -386,7 +378,7 @@ export async function generatePPTXBuffer(
     const hasPlaceholder = slideHasPlaceholder(slideXml);
     if (!hasPlaceholder) continue;
 
-    // Extract visible slide text to anchor slide type by heading content
+    // Extract visible slide text to anchor slide type by internal text/placeholder content
     const pMatches = slideXml.match(/<a:p>[\s\S]*?<\/a:p>/g) || [];
     const slideTextUpper = pMatches
       .map((p) => {
@@ -396,26 +388,30 @@ export async function generatePPTXBuffer(
       .join(" ")
       .toUpperCase();
 
-    // 1. Seruan Tobat (Slides 22, 23, 24)
-    if (sNum === 22) {
-      slideXml = replacePlaceholdersInXml(slideXml, [
-        mappedData.seruanTobat?.[0] || "",
-      ]);
-      zip.file(slide.fileName, slideXml);
-    } else if (sNum === 23) {
-      slideXml = replacePlaceholdersInXml(slideXml, [
-        mappedData.seruanTobat?.[1] || "",
-      ]);
-      zip.file(slide.fileName, slideXml);
-    } else if (sNum === 24) {
-      slideXml = replacePlaceholdersInXml(slideXml, [
-        mappedData.seruanTobat?.[2] || "",
-      ]);
-      zip.file(slide.fileName, slideXml);
+    // Skip song lyrics and announcement slides by content pattern
+    if (
+      slideTextUpper.includes("PENGUMUMAN") ||
+      slideTextUpper.includes("LIRIK LAGU")
+    ) {
+      continue;
     }
 
-    // 2. Doa Kolekta (Content Slide with (teks) placeholder)
-    else if (slideTextUpper.includes("MARILAH KITA BERDOA") && sNum <= 35) {
+    // 1. Seruan Tobat Content Slides
+    if (slideTextUpper.includes("KASIHANILAH KAMI")) {
+      const idx =
+        seruanCount < (mappedData.seruanTobat?.length || 0) ? seruanCount : 0;
+      slideXml = replacePlaceholdersInXml(slideXml, [
+        mappedData.seruanTobat?.[idx] || "",
+      ]);
+      zip.file(slide.fileName, slideXml);
+      seruanCount++;
+    }
+
+    // 2. Doa Kolekta Content Slide
+    else if (
+      slideTextUpper.includes("MARILAH KITA BERDOA") &&
+      !hasPassedBacaanPertama
+    ) {
       const originalSlideXml = slideXml;
       const kolektaChunks = splitTextIntoSlideChunks(
         mappedData.doaKolekta || "",
@@ -423,14 +419,11 @@ export async function generatePPTXBuffer(
       );
 
       if (kolektaChunks.length === 1) {
-        // Single slide: keep template intact (has intro and closing)
-        const filledSlide33Xml = replacePlaceholdersInXml(originalSlideXml, [
+        const filledSlideXml = replacePlaceholdersInXml(originalSlideXml, [
           kolektaChunks[0] || "",
         ]);
-        zip.file(slide.fileName, filledSlide33Xml);
+        zip.file(slide.fileName, filledSlideXml);
       } else {
-        // Multi-slide duplication:
-        // Slide 1: Keep intro paragraphs before (teks), strip closing paragraphs after (teks)
         let slide1Xml = stripClosingParagraphs(originalSlideXml);
         slide1Xml = replacePlaceholdersInXml(slide1Xml, [kolektaChunks[0]]);
         zip.file(slide.fileName, slide1Xml);
@@ -440,10 +433,7 @@ export async function generatePPTXBuffer(
           const isLast = i === kolektaChunks.length - 1;
           let dupSlideXml = originalSlideXml;
 
-          // Structurally strip intro paragraphs before (teks) on duplicated slides
           dupSlideXml = stripIntroParagraphs(dupSlideXml);
-
-          // Structurally strip closing paragraphs on middle slides (keep closing on final slide)
           if (!isLast) {
             dupSlideXml = stripClosingParagraphs(dupSlideXml);
           }
@@ -461,11 +451,12 @@ export async function generatePPTXBuffer(
       }
     }
 
-    // 3. Bacaan Pertama (Content Slide with (teks) placeholder + notesSlide2.xml)
+    // 3. Bacaan Pertama Content Slide (+ notesSlide2.xml)
     else if (
       slideTextUpper.includes("BACAAN PERTAMA") ||
       slideTextUpper.includes("BACAAN I ")
     ) {
+      hasPassedBacaanPertama = true;
       const epigraph = formatEpigraph(mappedData.bacaanPertama?.epigraph);
       const citation = cleanCitation(mappedData.bacaanPertama?.citation);
       slideXml = replacePlaceholdersInXml(slideXml, [epigraph, citation]);
@@ -484,45 +475,50 @@ export async function generatePPTXBuffer(
       }
     }
 
-    // 4. Mazmur Tanggapan (Slides 39, 41, 43)
-    else if (sNum === 39) {
+    // 4. Mazmur Tanggapan Content Slides (occurs between Bacaan Pertama and Bacaan Kedua)
+    else if (
+      hasPassedBacaanPertama &&
+      !hasPassedBacaanKedua &&
+      !slideTextUpper.includes("BACAAN KEDUA")
+    ) {
       const verses = mappedData.mazmurTanggapan?.verses || [];
-      slideXml = replacePlaceholdersInXml(slideXml, [verses[0] || ""]);
-      zip.file(slide.fileName, slideXml);
-    } else if (sNum === 41) {
-      const verses = mappedData.mazmurTanggapan?.verses || [];
-      slideXml = replacePlaceholdersInXml(slideXml, [verses[1] || ""]);
-      zip.file(slide.fileName, slideXml);
-    } else if (sNum === 43) {
-      const originalSlideXml = slideXml;
-      const verses = mappedData.mazmurTanggapan?.verses || [];
-      const filledSlide43Xml = replacePlaceholdersInXml(originalSlideXml, [
-        verses[2] || "",
-      ]);
-      zip.file(slide.fileName, filledSlide43Xml);
+      if (mazmurCount < 2) {
+        slideXml = replacePlaceholdersInXml(slideXml, [
+          verses[mazmurCount] || "",
+        ]);
+        zip.file(slide.fileName, slideXml);
+        mazmurCount++;
+      } else if (mazmurCount === 2) {
+        const originalSlideXml = slideXml;
+        const filledSlide43Xml = replacePlaceholdersInXml(originalSlideXml, [
+          verses[2] || "",
+        ]);
+        zip.file(slide.fileName, filledSlide43Xml);
 
-      // Duplicate slide 43 right after if there are > 3 verses
-      if (verses.length > 3) {
-        let lastRId = slide.rId;
-        for (let i = 3; i < verses.length; i++) {
-          const filledVerseXml = replacePlaceholdersInXml(originalSlideXml, [
-            verses[i],
-          ]);
-          const { newRId } = await duplicateSlide(
-            slide.fileName,
-            lastRId,
-            filledVerseXml,
-          );
-          lastRId = newRId;
+        if (verses.length > 3) {
+          let lastRId = slide.rId;
+          for (let i = 3; i < verses.length; i++) {
+            const filledVerseXml = replacePlaceholdersInXml(originalSlideXml, [
+              verses[i],
+            ]);
+            const { newRId } = await duplicateSlide(
+              slide.fileName,
+              lastRId,
+              filledVerseXml,
+            );
+            lastRId = newRId;
+          }
         }
+        mazmurCount++;
       }
     }
 
-    // 5. Bacaan Kedua (Content Slide with (teks) placeholder + notesSlide3.xml)
+    // 5. Bacaan Kedua Content Slide (+ notesSlide3.xml)
     else if (
       slideTextUpper.includes("BACAAN KEDUA") ||
       slideTextUpper.includes("BACAAN II ")
     ) {
+      hasPassedBacaanKedua = true;
       const epigraph = formatEpigraph(mappedData.bacaanKedua?.epigraph);
       const citation = cleanCitation(mappedData.bacaanKedua?.citation);
       slideXml = replacePlaceholdersInXml(slideXml, [epigraph, citation]);
@@ -541,15 +537,18 @@ export async function generatePPTXBuffer(
       }
     }
 
-    // 6. Bacaan Injil - Gospel Citation (Slide 50)
-    else if (sNum === 50) {
+    // 6. Bacaan Injil - Gospel Citation Intro Slide
+    else if (slideTextUpper.includes("INILAH INJIL SUCI MENURUT")) {
       const gospelName = mappedData.bacaanInjil?.gospelName || "";
       slideXml = replacePlaceholdersInXml(slideXml, [gospelName]);
       zip.file(slide.fileName, slideXml);
     }
 
-    // 7. Bacaan Injil - Epigraph & Citation (Content Slide with (teks) placeholder + notesSlide6.xml)
-    else if (slideTextUpper.includes("INJIL")) {
+    // 7. Bacaan Injil - Content Slide (+ notesSlide6.xml)
+    else if (
+      slideTextUpper.includes("INJIL") &&
+      !slideTextUpper.includes("PENGANTAR")
+    ) {
       const epigraph = formatEpigraph(mappedData.bacaanInjil?.epigraph);
       const citation = cleanCitation(mappedData.bacaanInjil?.citation);
       slideXml = replacePlaceholdersInXml(slideXml, [epigraph, citation]);
@@ -568,16 +567,11 @@ export async function generatePPTXBuffer(
       }
     }
 
-    // 8. Doa Umat Intro (Slide 68)
-    else if (sNum === 68) {
-      slideXml = replacePlaceholdersInXml(slideXml, [
-        mappedData.doaUmat?.intro || "",
-      ]);
-      zip.file(slide.fileName, slideXml);
-    }
-
-    // 9. Doa Umat Intentions (Slide 69 + Duplications right after if > 1 intentions)
-    else if (sNum === 69) {
+    // 8. Doa Umat Intentions Content Slide (Slide with 2 placeholders)
+    else if (
+      pMatches.length >= 2 &&
+      pMatches.filter((p) => /\(\s*teks\s*\)/i.test(p)).length >= 2
+    ) {
       const originalSlideXml = slideXml;
       const intentions = mappedData.doaUmat?.intentions || [];
       const title0 = intentions[0]?.title || "";
@@ -605,15 +599,29 @@ export async function generatePPTXBuffer(
       }
     }
 
-    // 10. Doa Umat Closing (Slide 71)
-    else if (sNum === 71) {
+    // 9. Doa Umat Intro
+    else if (
+      slideTextUpper.includes("DOA UMAT") &&
+      !slideTextUpper.includes("AMIN")
+    ) {
+      slideXml = replacePlaceholdersInXml(slideXml, [
+        mappedData.doaUmat?.intro || "",
+      ]);
+      zip.file(slide.fileName, slideXml);
+    }
+
+    // 10. Doa Umat Closing
+    else if (
+      slideTextUpper.includes("DOA UMAT") &&
+      slideTextUpper.includes("AMIN")
+    ) {
       slideXml = replacePlaceholdersInXml(slideXml, [
         mappedData.doaUmat?.closing || "",
       ]);
       zip.file(slide.fileName, slideXml);
     }
 
-    // 11. Doa Atas Persembahan (Content Slide with (teks) placeholder)
+    // 11. Doa Atas Persembahan Content Slide
     else if (
       slideTextUpper.includes("DOA ATAS PERSEMBAHAN") ||
       slideTextUpper.includes("ATAS PERSEMBAHAN")
@@ -656,7 +664,7 @@ export async function generatePPTXBuffer(
       }
     }
 
-    // 12. Doa Sesudah Komuni (Content Slide with (teks) placeholder)
+    // 12. Doa Sesudah Komuni Content Slide
     else if (
       slideTextUpper.includes("DOA SESUDAH KOMUNI") ||
       slideTextUpper.includes("SESUDAH KOMUNI")
