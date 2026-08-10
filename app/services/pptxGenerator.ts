@@ -53,6 +53,20 @@ function slideHasPlaceholder(slideXml: string): boolean {
   return false;
 }
 
+// ponytail: helper to count (teks) placeholders in a slide XML
+function getPlaceholderCount(slideXml: string): number {
+  const pMatches = slideXml.match(/<a:p>[\s\S]*?<\/a:p>/g) || [];
+  let count = 0;
+  for (const p of pMatches) {
+    const tMatches = p.match(/<a:t[^>]*>(.*?)<\/a:t>/g) || [];
+    const text = tMatches.map((t) => t.replace(/<[^>]+>/g, "")).join("");
+    if (/\(\s*teks\s*\)/i.test(text)) {
+      count++;
+    }
+  }
+  return count;
+}
+
 // ponytail: replace placeholders ( (teks) or (teks) ) in slide XML, handling run-splitting
 function replacePlaceholdersInXml(
   slideXml: string,
@@ -127,7 +141,8 @@ function replaceDoaUmatIntentionInXml(
           return `${titleParagraph}${bodyParagraph}`;
         } else {
           const singleText = title || body || "";
-          return `<a:p>${pPrXml}<a:r>${rPrBoldXml}<a:t>${escapeXml(singleText)}</a:t></a:r></a:p>`;
+          const rPrStyle = title ? rPrBoldXml : rPrUnboldXml;
+          return `<a:p>${pPrXml}<a:r>${rPrStyle}<a:t>${escapeXml(singleText)}</a:t></a:r></a:p>`;
         }
       } else if (replacementIndex === 1) {
         replacementIndex++;
@@ -244,19 +259,13 @@ function splitTextIntoSlideChunks(
   while (remaining.length > maxCharsPerSlide) {
     const slice = remaining.slice(0, maxCharsPerSlide);
 
-    // Look for last punctuation boundary (. , ! ? ;) in upper portion of slice
-    const periodIndex = slice.lastIndexOf(". ");
-    const commaIndex = slice.lastIndexOf(", ");
-    const exclamIndex = slice.lastIndexOf("! ");
-    const questIndex = slice.lastIndexOf("? ");
-    const semiIndex = slice.lastIndexOf("; ");
-    const lastPunctuationEnd = Math.max(
-      periodIndex,
-      commaIndex,
-      exclamIndex,
-      questIndex,
-      semiIndex,
-    );
+    let lastPunctuationEnd = -1;
+    const punctuationRegex = /[.,!?;]\s+/g;
+    let match: RegExpExecArray | null;
+
+    while ((match = punctuationRegex.exec(slice)) !== null) {
+      lastPunctuationEnd = match.index + match[0].length - 1;
+    }
 
     let cutIndex = -1;
 
@@ -319,64 +328,70 @@ export async function generatePPTXBuffer(
   const relMatches = presentationRels.matchAll(
     /<Relationship [^>]*Id="([^"]+)" [^>]*Target="([^"]+)"/g,
   );
-  for (const m of relMatches) {
-    rIdMap[m[1]] = m[2];
+  for (const match of relMatches) {
+    rIdMap[match[1]] = match[2];
   }
 
-  const sldMatches = presentationXml.matchAll(/<p:sldId [^>]*r:id="([^"]+)"/g);
+  const sldIdMatches = presentationXml.matchAll(
+    /<p:sldId [^>]*r:id="([^"]+)"[^>]*>/g,
+  );
   const slideOrder: { rId: string; fileName: string }[] = [];
-
-  for (const m of sldMatches) {
-    const rId = m[1];
+  for (const match of sldIdMatches) {
+    const rId = match[1];
     const target = rIdMap[rId];
-    if (target) {
-      const fileName = target.startsWith("ppt/") ? target : `ppt/${target}`;
-      slideOrder.push({ rId, fileName });
+    if (target && target.startsWith("slides/slide")) {
+      slideOrder.push({ rId, fileName: `ppt/${target}` });
     }
   }
 
-  // Track max numeric rId in presentation.xml.rels for valid OpenXML IDs (e.g. rId125)
-  const rIdNums = [...presentationRels.matchAll(/Id="rId(\d+)"/g)].map((m) =>
-    parseInt(m[1], 10),
-  );
-  let maxRId = Math.max(1, ...rIdNums);
+  // Extract maximum numeric rId from presentation.xml.rels
+  let maxRIdNum = 0;
+  for (const rIdStr of Object.keys(rIdMap)) {
+    const numMatch = rIdStr.match(/^rId(\d+)$/);
+    if (numMatch) {
+      const val = parseInt(numMatch[1], 10);
+      if (val > maxRIdNum) maxRIdNum = val;
+    }
+  }
 
-  // Find max slide file number and max sldId for duplication
-  const allSlideFiles = Object.keys(zip.files).filter((f) =>
-    /^ppt\/slides\/slide\d+\.xml$/.test(f),
-  );
-  let maxSlideNum = 117;
-  allSlideFiles.forEach((f) => {
-    const num = parseInt(f.match(/\d+/)?.[0] || "0", 10);
-    if (num > maxSlideNum) maxSlideNum = num;
-  });
+  // Extract max sldId id from presentation.xml
+  let maxSldId = 255;
+  const allSldIdMatches = presentationXml.matchAll(/<p:sldId [^>]*id="(\d+)"/g);
+  for (const match of allSldIdMatches) {
+    const val = parseInt(match[1], 10);
+    if (val > maxSldId) maxSldId = val;
+  }
 
-  const sldIdNums = [...presentationXml.matchAll(/<p:sldId id="(\d+)"/g)].map(
-    (m) => parseInt(m[1], 10),
-  );
-  let maxSldId = Math.max(256, ...sldIdNums);
-
-  // ponytail: helper to duplicate a slide cleanly by exact sourceFileName, inserting IMMEDIATELY AFTER targetRId
+  // ponytail: helper to dynamically duplicate a slide file, update Relationships & presentation.xml
   const duplicateSlide = async (
     sourceFileName: string,
     targetRId: string,
-    customXml?: string,
+    newSlideXml: string,
   ): Promise<{ newSlideNum: number; newFileName: string; newRId: string }> => {
-    maxSlideNum++;
-    maxSldId++;
-    maxRId++;
-    const newSlideNum = maxSlideNum;
+    const slideFiles = Object.keys(zip.files).filter((f) =>
+      /^ppt\/slides\/slide\d+\.xml$/.test(f),
+    );
+    const existingNums = slideFiles.map((f) => {
+      const match = f.match(/slide(\d+)\.xml/);
+      return match ? parseInt(match[1], 10) : 0;
+    });
+    const newSlideNum = Math.max(...existingNums, 0) + 1;
     const newFileName = `ppt/slides/slide${newSlideNum}.xml`;
-    const newRId = `rId${maxRId}`;
 
-    const xmlToWrite =
-      customXml || (await zip.file(sourceFileName)?.async("text"));
-    if (xmlToWrite) zip.file(newFileName, xmlToWrite);
+    maxRIdNum += 1;
+    const newRId = `rId${maxRIdNum}`;
+    rIdMap[newRId] = `slides/slide${newSlideNum}.xml`;
 
-    // Compute sourceRels from sourceFileName
-    const relsFileName = sourceFileName
-      .replace(/^ppt\/slides\//, "")
-      .replace(/\.xml$/, ".xml.rels");
+    maxSldId += 1;
+    const newSldId = maxSldId;
+
+    // Write duplicated slide XML
+    zip.file(newFileName, newSlideXml);
+
+    // Duplicate source slide's .rels file if present
+    const sourceSlideNumMatch = sourceFileName.match(/slide(\d+)\.xml/);
+    const sourceSlideNum = sourceSlideNumMatch ? sourceSlideNumMatch[1] : "1";
+    const relsFileName = `slide${sourceSlideNum}.xml.rels`;
     const sourceRels = `ppt/slides/_rels/${relsFileName}`;
     const sourceRelsFile = zip.file(sourceRels);
 
@@ -414,7 +429,7 @@ export async function generatePPTXBuffer(
     // Update ppt/presentation.xml - insert IMMEDIATELY AFTER targetRId's <p:sldId>
     let presXml = await zip.file("ppt/presentation.xml")?.async("text");
     if (presXml) {
-      const newSldTag = `<p:sldId id="${maxSldId}" r:id="${newRId}"/>`;
+      const newSldTag = `<p:sldId id="${newSldId}" r:id="${newRId}"/>`;
       const targetRegex = new RegExp(
         `(<p:sldId [^>]*r:id="${targetRId}"[^>]*\\/?>)`,
       );
@@ -463,6 +478,23 @@ export async function generatePPTXBuffer(
       !slideTextUpper.includes("AMIN")
     ) {
       hasPassedDoaUmatTitle = true;
+    }
+
+    // Track Bacaan Pertama & Bacaan Kedua titles
+    if (
+      !hasPassedBacaanPertama &&
+      (slideTextUpper.includes("BACAAN PERTAMA") ||
+        slideTextUpper.includes("BACAAN I "))
+    ) {
+      hasPassedBacaanPertama = true;
+    }
+
+    if (
+      !hasPassedBacaanKedua &&
+      (slideTextUpper.includes("BACAAN KEDUA") ||
+        slideTextUpper.includes("BACAAN II "))
+    ) {
+      hasPassedBacaanKedua = true;
     }
 
     // Only process content slides that actually contain a (teks) placeholder
@@ -537,7 +569,6 @@ export async function generatePPTXBuffer(
       slideTextUpper.includes("BACAAN PERTAMA") ||
       slideTextUpper.includes("BACAAN I ")
     ) {
-      hasPassedBacaanPertama = true;
       const epigraph = formatEpigraph(mappedData.bacaanPertama?.epigraph);
       const citation = cleanCitation(mappedData.bacaanPertama?.citation);
       slideXml = replacePlaceholdersInXml(slideXml, [epigraph, citation]);
@@ -558,33 +589,37 @@ export async function generatePPTXBuffer(
 
     // 4. Mazmur Tanggapan Content Slide (duplication for all verses sequentially)
     else if (
-      hasPassedBacaanPertama &&
-      !hasPassedBacaanKedua &&
+      (slideTextUpper.includes("MAZMUR") ||
+        slideTextUpper.includes("TANGGAPAN") ||
+        (hasPassedBacaanPertama && !hasPassedBacaanKedua)) &&
       !hasHandledMazmur &&
-      !slideTextUpper.includes("BACAAN KEDUA")
+      !slideTextUpper.includes("BACAAN KEDUA") &&
+      !slideTextUpper.includes("BACAAN PERTAMA")
     ) {
       const verses = mappedData.mazmurTanggapan?.verses || [];
       const originalSlideXml = slideXml;
 
-      // Fill 1st verse into 1st Mazmur placeholder slide
-      const filledSlideXml = replacePlaceholdersInXml(originalSlideXml, [
-        verses[0] || "",
-      ]);
-      zip.file(slide.fileName, filledSlideXml);
+      if (verses.length > 0) {
+        // Fill 1st verse into 1st Mazmur placeholder slide
+        const filledSlideXml = replacePlaceholdersInXml(originalSlideXml, [
+          verses[0] || "",
+        ]);
+        zip.file(slide.fileName, filledSlideXml);
 
-      // Duplicate slide for all remaining verses (verses[1], verses[2], etc.)
-      if (verses.length > 1) {
-        let lastRId = slide.rId;
-        for (let i = 1; i < verses.length; i++) {
-          const filledVerseXml = replacePlaceholdersInXml(originalSlideXml, [
-            verses[i],
-          ]);
-          const { newRId } = await duplicateSlide(
-            slide.fileName,
-            lastRId,
-            filledVerseXml,
-          );
-          lastRId = newRId;
+        // Duplicate slide for all remaining verses (verses[1], verses[2], etc.)
+        if (verses.length > 1) {
+          let lastRId = slide.rId;
+          for (let i = 1; i < verses.length; i++) {
+            const filledVerseXml = replacePlaceholdersInXml(originalSlideXml, [
+              verses[i],
+            ]);
+            const { newRId } = await duplicateSlide(
+              slide.fileName,
+              lastRId,
+              filledVerseXml,
+            );
+            lastRId = newRId;
+          }
         }
       }
       hasHandledMazmur = true;
@@ -595,7 +630,6 @@ export async function generatePPTXBuffer(
       slideTextUpper.includes("BACAAN KEDUA") ||
       slideTextUpper.includes("BACAAN II ")
     ) {
-      hasPassedBacaanKedua = true;
       const epigraph = formatEpigraph(mappedData.bacaanKedua?.epigraph);
       const citation = cleanCitation(mappedData.bacaanKedua?.citation);
       slideXml = replacePlaceholdersInXml(slideXml, [epigraph, citation]);
@@ -644,72 +678,128 @@ export async function generatePPTXBuffer(
       }
     }
 
-    // 8. Doa Umat Intro Slide (Slide 63: right after DOA UMAT title slide with 1 placeholder)
+    // 8. Doa Umat Intro Slide (Slide 63: right after DOA UMAT title slide with 1 placeholder, supporting overflow splitting)
     else if (hasPassedDoaUmatTitle && !hasHandledDoaUmatIntro) {
-      slideXml = replacePlaceholdersInXml(slideXml, [
-        mappedData.doaUmat?.intro || "",
-      ]);
-      zip.file(slide.fileName, slideXml);
-      hasHandledDoaUmatIntro = true;
+      const count = getPlaceholderCount(slideXml);
+      if (count === 1) {
+        const originalSlideXml = slideXml;
+        const introChunks = splitTextIntoSlideChunks(
+          mappedData.doaUmat?.intro || "",
+          260,
+        );
+
+        const filledIntroXml = replacePlaceholdersInXml(originalSlideXml, [
+          introChunks[0] || "",
+        ]);
+        zip.file(slide.fileName, filledIntroXml);
+
+        if (introChunks.length > 1) {
+          let lastRId = slide.rId;
+          for (let i = 1; i < introChunks.length; i++) {
+            const filledChunkXml = replacePlaceholdersInXml(originalSlideXml, [
+              introChunks[i],
+            ]);
+            const { newRId } = await duplicateSlide(
+              slide.fileName,
+              lastRId,
+              filledChunkXml,
+            );
+            lastRId = newRId;
+          }
+        }
+        hasHandledDoaUmatIntro = true;
+      }
     }
 
-    // 9. Doa Umat Intentions Content Slide (Slide 64: 2 placeholders - Placeholder 1 = Bold Title & Unbold Body (\n), Placeholder 2 = Yellow Italic Response)
+    // 9. Doa Umat Intentions Content Slide (Slide 64: 2 placeholders - Placeholder 1 = Bold Title & Unbold Body (\n), Placeholder 2 = Yellow Italic Response, with overflow splitting)
     else if (
       hasPassedDoaUmatTitle &&
       hasHandledDoaUmatIntro &&
       !hasHandledDoaUmatIntentions
     ) {
-      const originalSlideXml = slideXml;
-      const intentions = mappedData.doaUmat?.intentions || [];
+      const count = getPlaceholderCount(slideXml);
+      if (count >= 2) {
+        const originalSlideXml = slideXml;
+        const intentions = mappedData.doaUmat?.intentions || [];
 
-      if (intentions.length > 0) {
-        const item0 = intentions[0];
-        const filledSlide64Xml = replaceDoaUmatIntentionInXml(
-          originalSlideXml,
-          item0.title,
-          item0.body,
-          item0.response,
-        );
-        zip.file(slide.fileName, filledSlide64Xml);
-
-        if (intentions.length > 1) {
+        if (intentions.length > 0) {
+          let isFirstSlide = true;
           let lastRId = slide.rId;
-          for (let i = 1; i < intentions.length; i++) {
+
+          for (let i = 0; i < intentions.length; i++) {
             const item = intentions[i];
-            const filledIntentionXml = replaceDoaUmatIntentionInXml(
-              originalSlideXml,
-              item.title,
-              item.body,
-              item.response,
-            );
-            const { newRId } = await duplicateSlide(
-              slide.fileName,
-              lastRId,
-              filledIntentionXml,
-            );
-            lastRId = newRId;
+            const bodyChunks = splitTextIntoSlideChunks(item.body || "", 260);
+
+            for (let c = 0; c < bodyChunks.length; c++) {
+              const bodyChunk = bodyChunks[c];
+              const isLastChunk = c === bodyChunks.length - 1;
+              const resp = isLastChunk ? item.response : "";
+
+              // Only include title on the 1st chunk slide for this intention
+              const intentionTitle = c === 0 ? item.title : "";
+
+              const filledIntentionXml = replaceDoaUmatIntentionInXml(
+                originalSlideXml,
+                intentionTitle,
+                bodyChunk,
+                resp,
+              );
+
+              if (isFirstSlide) {
+                zip.file(slide.fileName, filledIntentionXml);
+                isFirstSlide = false;
+              } else {
+                const { newRId } = await duplicateSlide(
+                  slide.fileName,
+                  lastRId,
+                  filledIntentionXml,
+                );
+                lastRId = newRId;
+              }
+            }
           }
+        } else {
+          const clearedSlideXml = replacePlaceholdersInXml(originalSlideXml, [
+            "",
+            "",
+          ]);
+          zip.file(slide.fileName, clearedSlideXml);
         }
-      } else {
-        const clearedSlideXml = replacePlaceholdersInXml(originalSlideXml, [
-          "",
-          "",
-        ]);
-        zip.file(slide.fileName, clearedSlideXml);
+        hasHandledDoaUmatIntentions = true;
       }
-      hasHandledDoaUmatIntentions = true;
     }
 
-    // 10. Doa Umat Outro / Penutup Slide (Slide 66: U Amin. & 1 placeholder)
+    // 10. Doa Umat Outro / Penutup Slide (Slide 66: U Amin. & 1 placeholder, supporting overflow splitting)
     else if (
       hasPassedDoaUmatTitle &&
       hasHandledDoaUmatIntentions &&
       !hasHandledDoaUmatOutro
     ) {
-      slideXml = replacePlaceholdersInXml(slideXml, [
+      const originalSlideXml = slideXml;
+      const outroChunks = splitTextIntoSlideChunks(
         mappedData.doaUmat?.closing || "",
+        260,
+      );
+
+      const filledOutroXml = replacePlaceholdersInXml(originalSlideXml, [
+        outroChunks[0] || "",
       ]);
-      zip.file(slide.fileName, slideXml);
+      zip.file(slide.fileName, filledOutroXml);
+
+      if (outroChunks.length > 1) {
+        let lastRId = slide.rId;
+        for (let i = 1; i < outroChunks.length; i++) {
+          const filledChunkXml = replacePlaceholdersInXml(originalSlideXml, [
+            outroChunks[i],
+          ]);
+          const { newRId } = await duplicateSlide(
+            slide.fileName,
+            lastRId,
+            filledChunkXml,
+          );
+          lastRId = newRId;
+        }
+      }
       hasHandledDoaUmatOutro = true;
       hasPassedDoaUmatTitle = false;
     }
