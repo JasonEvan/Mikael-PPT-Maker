@@ -81,6 +81,21 @@ function getHeadingTitleText(p: LiturgyParagraph): string | null {
   return titleText.length > 0 ? titleText : null;
 }
 
+// ponytail: helper to clean formula lines (Marilah kita berdoa, U. Amin) from prayer bodies
+function cleanPrayerBody(lines: string[]): string {
+  const filtered = lines.filter((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return false;
+    if (/^I[\s.]*Marilah/i.test(trimmed)) return false;
+    if (/^Marilah kita berdoa/i.test(trimmed)) return false;
+    if (/^\(?hening sejenak\)?$/i.test(trimmed)) return false;
+    if (/^U[\s.]*Amin/i.test(trimmed)) return false;
+    if (/^Amin\.?$/i.test(trimmed)) return false;
+    return true;
+  });
+  return filtered.join("\n\n").trim();
+}
+
 // ponytail: extract text and run formatting from word/document.xml
 export async function parseDocxFile(file: File): Promise<DocxParseResult> {
   const arrayBuffer = await file.arrayBuffer();
@@ -403,10 +418,10 @@ export function selectRelevantSections(parsed: DocxParseResult): MappedLiturgyDa
       continue;
     }
 
-    // 2. Doa Kolekta
+    // 2. Doa Kolekta (clean formula lines like Marilah kita berdoa & U. Amin)
     if (titleNorm.includes("DOA KOLEKTA") || (titleNorm.includes("KOLEKTA") && !mappedData.doaKolekta)) {
       const lines = sec.body?.filter((b) => b !== sec.title) || [];
-      mappedData.doaKolekta = lines.join("\n\n");
+      mappedData.doaKolekta = cleanPrayerBody(lines);
       mappedSectionIds.add(sec.id);
       continue;
     }
@@ -505,24 +520,24 @@ export function selectRelevantSections(parsed: DocxParseResult): MappedLiturgyDa
       continue;
     }
 
-    // 8. Doa Atas Persembahan
+    // 8. Doa Atas Persembahan (clean formula lines)
     if (
       (titleNorm.includes("DOA ATAS PERSEMBAHAN") || titleNorm.includes("ATAS PERSEMBAHAN")) &&
       !mappedData.doaAtasPersembahan
     ) {
       const lines = sec.body?.filter((b) => b !== sec.title) || [];
-      mappedData.doaAtasPersembahan = lines.join("\n\n");
+      mappedData.doaAtasPersembahan = cleanPrayerBody(lines);
       mappedSectionIds.add(sec.id);
       continue;
     }
 
-    // 9. Doa Sesudah Komuni
+    // 9. Doa Sesudah Komuni (clean formula lines)
     if (
       (titleNorm.includes("DOA SESUDAH KOMUNI") || titleNorm.includes("SESUDAH KOMUNI")) &&
       !mappedData.doaSesudahKomuni
     ) {
       const lines = sec.body?.filter((b) => b !== sec.title) || [];
-      mappedData.doaSesudahKomuni = lines.join("\n\n");
+      mappedData.doaSesudahKomuni = cleanPrayerBody(lines);
       mappedSectionIds.add(sec.id);
       continue;
     }

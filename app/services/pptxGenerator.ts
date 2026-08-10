@@ -15,7 +15,10 @@ function escapeXml(str: string): string {
 }
 
 // ponytail: replace placeholders ( (teks) or (teks) ) in slide XML, handling run-splitting
-function replacePlaceholdersInXml(slideXml: string, replacements: string[]): string {
+function replacePlaceholdersInXml(
+  slideXml: string,
+  replacements: string[],
+): string {
   let replacementIndex = 0;
 
   return slideXml.replace(/<a:p>[\s\S]*?<\/a:p>/g, (pBlock) => {
@@ -24,7 +27,10 @@ function replacePlaceholdersInXml(slideXml: string, replacements: string[]): str
     const fullText = tMatches.map((t) => t.replace(/<[^>]+>/g, "")).join("");
 
     if (/\(\s*teks\s*\)/i.test(fullText)) {
-      const valToInsert = replacementIndex < replacements.length ? replacements[replacementIndex] : "";
+      const valToInsert =
+        replacementIndex < replacements.length
+          ? replacements[replacementIndex]
+          : "";
       replacementIndex++;
 
       const newText = fullText.replace(/\(\s*teks\s*\)/gi, valToInsert);
@@ -50,17 +56,85 @@ function updateNotesSlideXml(notesXml: string, notesText: string): string {
 
   // Preserve (jangan diblank) reminder if present
   if (/(\(\s*jangan diblank\s*\))/i.test(notesXml)) {
-    return notesXml.replace(/(\(\s*jangan diblank\s*\))/i, `$1\n\n${escapedNotes}`);
+    return notesXml.replace(
+      /(\(\s*jangan diblank\s*\))/i,
+      `$1\n\n${escapedNotes}`,
+    );
   } else {
-    return notesXml.replace(/(<\/p:txBody>)/, `<a:p><a:r><a:t>${escapedNotes}</a:t></a:r></a:p>$1`);
+    return notesXml.replace(
+      /(<\/p:txBody>)/,
+      `<a:p><a:r><a:t>${escapedNotes}</a:t></a:r></a:p>$1`,
+    );
   }
 }
 
+// ponytail: dynamically calculate overflow cut points for any text based on character limit & natural sentence/word boundaries
+function splitTextIntoSlideChunks(
+  text: string,
+  maxCharsPerSlide: number = 260,
+): string[] {
+  if (!text || text.trim().length === 0) return [""];
+  const trimmed = text.trim();
+
+  // Return single chunk if text fits within maxCharsPerSlide
+  if (trimmed.length <= maxCharsPerSlide) {
+    return [trimmed];
+  }
+
+  const chunks: string[] = [];
+  let remaining = trimmed;
+
+  while (remaining.length > maxCharsPerSlide) {
+    const slice = remaining.slice(0, maxCharsPerSlide);
+
+    // Look for last sentence boundary (. ! ?) in upper portion of slice
+    const periodIndex = slice.lastIndexOf(". ");
+    const exclamIndex = slice.lastIndexOf("! ");
+    const questIndex = slice.lastIndexOf("? ");
+    const lastSentenceEnd = Math.max(periodIndex, exclamIndex, questIndex);
+
+    let cutIndex = -1;
+
+    // Prefer cutting at sentence end if it occurs past 40% of maxCharsPerSlide
+    if (lastSentenceEnd > Math.floor(maxCharsPerSlide * 0.4)) {
+      cutIndex = lastSentenceEnd + 1; // Include period
+    } else {
+      // Fallback: cut at last space (word boundary)
+      const lastSpaceIndex = slice.lastIndexOf(" ");
+      if (lastSpaceIndex > Math.floor(maxCharsPerSlide * 0.4)) {
+        cutIndex = lastSpaceIndex;
+      } else {
+        // Fallback to exact limit
+        cutIndex = maxCharsPerSlide;
+      }
+    }
+
+    const chunk = remaining.slice(0, cutIndex).trim();
+    if (chunk.length > 0) {
+      chunks.push(chunk);
+    }
+    remaining = remaining.slice(cutIndex).trim();
+  }
+
+  if (remaining.length > 0) {
+    chunks.push(remaining);
+  }
+
+  return chunks.length > 0 ? chunks : [trimmed];
+}
+
 // ponytail: generate filled PPTX from template and MappedLiturgyData
-export async function generatePPTXBuffer(mappedData: MappedLiturgyData): Promise<Buffer> {
-  const templatePath = path.join(process.cwd(), "app/template/Template_Mingguan.pptx");
+export async function generatePPTXBuffer(
+  mappedData: MappedLiturgyData,
+): Promise<Buffer> {
+  const templatePath = path.join(
+    process.cwd(),
+    "app/template/Template_Mingguan.pptx",
+  );
   if (!fs.existsSync(templatePath)) {
-    throw new Error("Template PowerPoint (Template_Mingguan.pptx) tidak ditemukan.");
+    throw new Error(
+      "Template PowerPoint (Template_Mingguan.pptx) tidak ditemukan.",
+    );
   }
 
   const templateBuffer = await fs.promises.readFile(templatePath);
@@ -68,14 +142,18 @@ export async function generatePPTXBuffer(mappedData: MappedLiturgyData): Promise
 
   // 1. Read presentation structure and slide mapping
   const presentationXml = await zip.file("ppt/presentation.xml")?.async("text");
-  const presentationRels = await zip.file("ppt/_rels/presentation.xml.rels")?.async("text");
+  const presentationRels = await zip
+    .file("ppt/_rels/presentation.xml.rels")
+    ?.async("text");
 
   if (!presentationXml || !presentationRels) {
     throw new Error("Struktur berkas PowerPoint tidak valid.");
   }
 
   const rIdMap: Record<string, string> = {};
-  const relMatches = presentationRels.matchAll(/<Relationship [^>]*Id="([^"]+)" [^>]*Target="([^"]+)"/g);
+  const relMatches = presentationRels.matchAll(
+    /<Relationship [^>]*Id="([^"]+)" [^>]*Target="([^"]+)"/g,
+  );
   for (const m of relMatches) {
     rIdMap[m[1]] = m[2];
   }
@@ -94,32 +172,54 @@ export async function generatePPTXBuffer(mappedData: MappedLiturgyData): Promise
     }
   }
 
+  // Track max numeric rId in presentation.xml.rels for valid OpenXML IDs (e.g. rId125)
+  const rIdNums = [...presentationRels.matchAll(/Id="rId(\d+)"/g)].map((m) =>
+    parseInt(m[1], 10),
+  );
+  let maxRId = Math.max(1, ...rIdNums);
+
   // Find max slide file number and max sldId for duplication
-  const allSlideFiles = Object.keys(zip.files).filter((f) => /^ppt\/slides\/slide\d+\.xml$/.test(f));
+  const allSlideFiles = Object.keys(zip.files).filter((f) =>
+    /^ppt\/slides\/slide\d+\.xml$/.test(f),
+  );
   let maxSlideNum = 117;
   allSlideFiles.forEach((f) => {
     const num = parseInt(f.match(/\d+/)?.[0] || "0", 10);
     if (num > maxSlideNum) maxSlideNum = num;
   });
 
-  const sldIdNums = [...presentationXml.matchAll(/<p:sldId id="(\d+)"/g)].map((m) => parseInt(m[1], 10));
+  const sldIdNums = [...presentationXml.matchAll(/<p:sldId id="(\d+)"/g)].map(
+    (m) => parseInt(m[1], 10),
+  );
   let maxSldId = Math.max(256, ...sldIdNums);
 
-  // ponytail: helper to duplicate a slide in the PPTX archive
-  const duplicateSlide = async (sourceSlideNum: number): Promise<{ newSlideNum: number; newFileName: string }> => {
+  // ponytail: helper to duplicate a slide cleanly and insert it IMMEDIATELY AFTER targetRId
+  const duplicateSlide = async (
+    sourceSlideNum: number,
+    targetRId: string,
+    customXml?: string,
+  ): Promise<{ newSlideNum: number; newFileName: string; newRId: string }> => {
     maxSlideNum++;
     maxSldId++;
+    maxRId++;
     const newSlideNum = maxSlideNum;
     const newFileName = `ppt/slides/slide${newSlideNum}.xml`;
     const sourceFileName = `ppt/slides/slide${sourceSlideNum}.xml`;
+    const newRId = `rId${maxRId}`;
 
-    const sourceXml = await zip.file(sourceFileName)?.async("text");
-    if (sourceXml) zip.file(newFileName, sourceXml);
+    const xmlToWrite =
+      customXml || (await zip.file(sourceFileName)?.async("text"));
+    if (xmlToWrite) zip.file(newFileName, xmlToWrite);
 
     const sourceRels = `ppt/slides/_rels/slide${sourceSlideNum}.xml.rels`;
     const sourceRelsFile = zip.file(sourceRels);
     if (sourceRelsFile) {
-      const relsXml = await sourceRelsFile.async("text");
+      let relsXml = await sourceRelsFile.async("text");
+      // Strip notesSlide relationship from duplicated slide to prevent OpenXML schema collision
+      relsXml = relsXml.replace(
+        /<Relationship [^>]*Type="http:\/\/schemas\.openxmlformats\.org\/officeDocument\/2006\/relationships\/notesSlide"[^>]*\/>/g,
+        "",
+      );
       zip.file(`ppt/slides/_rels/slide${newSlideNum}.xml.rels`, relsXml);
     }
 
@@ -131,24 +231,35 @@ export async function generatePPTXBuffer(mappedData: MappedLiturgyData): Promise
       zip.file("[Content_Types].xml", contentTypes);
     }
 
-    // Update ppt/_rels/presentation.xml.rels
-    let presRels = await zip.file("ppt/_rels/presentation.xml.rels")?.async("text");
-    const newRId = `rIdSld${newSlideNum}`;
+    // Update ppt/_rels/presentation.xml.rels using valid numeric rId (e.g. rId125)
+    let presRels = await zip
+      .file("ppt/_rels/presentation.xml.rels")
+      ?.async("text");
     if (presRels) {
       const relTag = `<Relationship Id="${newRId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide${newSlideNum}.xml"/>`;
-      presRels = presRels.replace("</Relationships>", `${relTag}</Relationships>`);
+      presRels = presRels.replace(
+        "</Relationships>",
+        `${relTag}</Relationships>`,
+      );
       zip.file("ppt/_rels/presentation.xml.rels", presRels);
     }
 
-    // Update ppt/presentation.xml
+    // Update ppt/presentation.xml - insert IMMEDIATELY AFTER targetRId's <p:sldId>
     let presXml = await zip.file("ppt/presentation.xml")?.async("text");
     if (presXml) {
       const newSldTag = `<p:sldId id="${maxSldId}" r:id="${newRId}"/>`;
-      presXml = presXml.replace("</p:sldIdLst>", `${newSldTag}</p:sldIdLst>`);
+      const targetRegex = new RegExp(
+        `(<p:sldId [^>]*r:id="${targetRId}"[^>]*\\/?>)`,
+      );
+      if (targetRegex.test(presXml)) {
+        presXml = presXml.replace(targetRegex, `$1${newSldTag}`);
+      } else {
+        presXml = presXml.replace("</p:sldIdLst>", `${newSldTag}</p:sldIdLst>`);
+      }
       zip.file("ppt/presentation.xml", presXml);
     }
 
-    return { newSlideNum, newFileName };
+    return { newSlideNum, newFileName, newRId };
   };
 
   // ponytail: process each slide placeholder according to MVP scope
@@ -156,7 +267,12 @@ export async function generatePPTXBuffer(mappedData: MappedLiturgyData): Promise
     const sNum = slide.index;
 
     // Skip slides 74, 95, 117 (song lyrics) & slides 102–112 (announcements)
-    if (sNum === 74 || sNum === 95 || sNum === 117 || (sNum >= 102 && sNum <= 112)) {
+    if (
+      sNum === 74 ||
+      sNum === 95 ||
+      sNum === 117 ||
+      (sNum >= 102 && sNum <= 112)
+    ) {
       continue;
     }
 
@@ -167,20 +283,44 @@ export async function generatePPTXBuffer(mappedData: MappedLiturgyData): Promise
 
     // 1. Seruan Tobat (Slides 22, 23, 24)
     if (sNum === 22) {
-      slideXml = replacePlaceholdersInXml(slideXml, [mappedData.seruanTobat?.[0] || ""]);
+      slideXml = replacePlaceholdersInXml(slideXml, [
+        mappedData.seruanTobat?.[0] || "",
+      ]);
       zip.file(slide.fileName, slideXml);
     } else if (sNum === 23) {
-      slideXml = replacePlaceholdersInXml(slideXml, [mappedData.seruanTobat?.[1] || ""]);
+      slideXml = replacePlaceholdersInXml(slideXml, [
+        mappedData.seruanTobat?.[1] || "",
+      ]);
       zip.file(slide.fileName, slideXml);
     } else if (sNum === 24) {
-      slideXml = replacePlaceholdersInXml(slideXml, [mappedData.seruanTobat?.[2] || ""]);
+      slideXml = replacePlaceholdersInXml(slideXml, [
+        mappedData.seruanTobat?.[2] || "",
+      ]);
       zip.file(slide.fileName, slideXml);
     }
 
-    // 2. Doa Kolekta (Slide 33)
+    // 2. Doa Kolekta (Slide 33 + duplicate slide right after if dynamically overflowed > 260 chars)
     else if (sNum === 33) {
-      slideXml = replacePlaceholdersInXml(slideXml, [mappedData.doaKolekta || ""]);
-      zip.file(slide.fileName, slideXml);
+      const originalSlideXml = slideXml;
+      const kolektaChunks = splitTextIntoSlideChunks(
+        mappedData.doaKolekta || "",
+        260,
+      );
+      const filledSlide33Xml = replacePlaceholdersInXml(originalSlideXml, [
+        kolektaChunks[0] || "",
+      ]);
+      zip.file(slide.fileName, filledSlide33Xml);
+
+      if (kolektaChunks.length > 1) {
+        let lastRId = slide.rId;
+        for (let i = 1; i < kolektaChunks.length; i++) {
+          const filledChunkXml = replacePlaceholdersInXml(originalSlideXml, [
+            kolektaChunks[i],
+          ]);
+          const { newRId } = await duplicateSlide(33, lastRId, filledChunkXml);
+          lastRId = newRId;
+        }
+      }
     }
 
     // 3. Bacaan Pertama (Slide 35 + notesSlide2.xml)
@@ -194,7 +334,10 @@ export async function generatePPTXBuffer(mappedData: MappedLiturgyData): Promise
         const notesFile = zip.file("ppt/notesSlides/notesSlide2.xml");
         if (notesFile) {
           const notesXml = await notesFile.async("text");
-          const updatedNotes = updateNotesSlideXml(notesXml, mappedData.bacaanPertama.notesBody);
+          const updatedNotes = updateNotesSlideXml(
+            notesXml,
+            mappedData.bacaanPertama.notesBody,
+          );
           zip.file("ppt/notesSlides/notesSlide2.xml", updatedNotes);
         }
       }
@@ -210,19 +353,22 @@ export async function generatePPTXBuffer(mappedData: MappedLiturgyData): Promise
       slideXml = replacePlaceholdersInXml(slideXml, [verses[1] || ""]);
       zip.file(slide.fileName, slideXml);
     } else if (sNum === 43) {
+      const originalSlideXml = slideXml;
       const verses = mappedData.mazmurTanggapan?.verses || [];
-      slideXml = replacePlaceholdersInXml(slideXml, [verses[2] || ""]);
-      zip.file(slide.fileName, slideXml);
+      const filledSlide43Xml = replacePlaceholdersInXml(originalSlideXml, [
+        verses[2] || "",
+      ]);
+      zip.file(slide.fileName, filledSlide43Xml);
 
-      // Duplicate slide 43 if there are > 3 verses
+      // Duplicate slide 43 right after if there are > 3 verses
       if (verses.length > 3) {
+        let lastRId = slide.rId;
         for (let i = 3; i < verses.length; i++) {
-          const { newFileName } = await duplicateSlide(43);
-          const dupXml = await zip.file(newFileName)?.async("text");
-          if (dupXml) {
-            const filledDupXml = replacePlaceholdersInXml(dupXml, [verses[i]]);
-            zip.file(newFileName, filledDupXml);
-          }
+          const filledVerseXml = replacePlaceholdersInXml(originalSlideXml, [
+            verses[i],
+          ]);
+          const { newRId } = await duplicateSlide(43, lastRId, filledVerseXml);
+          lastRId = newRId;
         }
       }
     }
@@ -238,7 +384,10 @@ export async function generatePPTXBuffer(mappedData: MappedLiturgyData): Promise
         const notesFile = zip.file("ppt/notesSlides/notesSlide3.xml");
         if (notesFile) {
           const notesXml = await notesFile.async("text");
-          const updatedNotes = updateNotesSlideXml(notesXml, mappedData.bacaanKedua.notesBody);
+          const updatedNotes = updateNotesSlideXml(
+            notesXml,
+            mappedData.bacaanKedua.notesBody,
+          );
           zip.file("ppt/notesSlides/notesSlide3.xml", updatedNotes);
         }
       }
@@ -262,7 +411,10 @@ export async function generatePPTXBuffer(mappedData: MappedLiturgyData): Promise
         const notesFile = zip.file("ppt/notesSlides/notesSlide6.xml");
         if (notesFile) {
           const notesXml = await notesFile.async("text");
-          const updatedNotes = updateNotesSlideXml(notesXml, mappedData.bacaanInjil.notesBody);
+          const updatedNotes = updateNotesSlideXml(
+            notesXml,
+            mappedData.bacaanInjil.notesBody,
+          );
           zip.file("ppt/notesSlides/notesSlide6.xml", updatedNotes);
         }
       }
@@ -270,46 +422,95 @@ export async function generatePPTXBuffer(mappedData: MappedLiturgyData): Promise
 
     // 8. Doa Umat Intro (Slide 68)
     else if (sNum === 68) {
-      slideXml = replacePlaceholdersInXml(slideXml, [mappedData.doaUmat?.intro || ""]);
+      slideXml = replacePlaceholdersInXml(slideXml, [
+        mappedData.doaUmat?.intro || "",
+      ]);
       zip.file(slide.fileName, slideXml);
     }
 
-    // 9. Doa Umat Intentions (Slide 69 + Duplications if > 1 intentions)
+    // 9. Doa Umat Intentions (Slide 69 + Duplications right after if > 1 intentions)
     else if (sNum === 69) {
+      const originalSlideXml = slideXml;
       const intentions = mappedData.doaUmat?.intentions || [];
       const title0 = intentions[0]?.title || "";
       const body0 = intentions[0]?.body || "";
-      slideXml = replacePlaceholdersInXml(slideXml, [title0, body0]);
-      zip.file(slide.fileName, slideXml);
+      const filledSlide69Xml = replacePlaceholdersInXml(originalSlideXml, [
+        title0,
+        body0,
+      ]);
+      zip.file(slide.fileName, filledSlide69Xml);
 
       if (intentions.length > 1) {
+        let lastRId = slide.rId;
         for (let i = 1; i < intentions.length; i++) {
-          const { newFileName } = await duplicateSlide(69);
-          const dupXml = await zip.file(newFileName)?.async("text");
-          if (dupXml) {
-            const filledDupXml = replacePlaceholdersInXml(dupXml, [intentions[i].title, intentions[i].body]);
-            zip.file(newFileName, filledDupXml);
-          }
+          const filledIntentionXml = replacePlaceholdersInXml(
+            originalSlideXml,
+            [intentions[i].title, intentions[i].body],
+          );
+          const { newRId } = await duplicateSlide(
+            69,
+            lastRId,
+            filledIntentionXml,
+          );
+          lastRId = newRId;
         }
       }
     }
 
     // 10. Doa Umat Closing (Slide 71)
     else if (sNum === 71) {
-      slideXml = replacePlaceholdersInXml(slideXml, [mappedData.doaUmat?.closing || ""]);
+      slideXml = replacePlaceholdersInXml(slideXml, [
+        mappedData.doaUmat?.closing || "",
+      ]);
       zip.file(slide.fileName, slideXml);
     }
 
-    // 11. Doa Atas Persembahan (Slide 77)
+    // 11. Doa Atas Persembahan (Slide 77 + duplicate slide right after if dynamically overflowed > 260 chars)
     else if (sNum === 77) {
-      slideXml = replacePlaceholdersInXml(slideXml, [mappedData.doaAtasPersembahan || ""]);
-      zip.file(slide.fileName, slideXml);
+      const originalSlideXml = slideXml;
+      const persembahanChunks = splitTextIntoSlideChunks(
+        mappedData.doaAtasPersembahan || "",
+        260,
+      );
+      const filledSlide77Xml = replacePlaceholdersInXml(originalSlideXml, [
+        persembahanChunks[0] || "",
+      ]);
+      zip.file(slide.fileName, filledSlide77Xml);
+
+      if (persembahanChunks.length > 1) {
+        let lastRId = slide.rId;
+        for (let i = 1; i < persembahanChunks.length; i++) {
+          const filledChunkXml = replacePlaceholdersInXml(originalSlideXml, [
+            persembahanChunks[i],
+          ]);
+          const { newRId } = await duplicateSlide(77, lastRId, filledChunkXml);
+          lastRId = newRId;
+        }
+      }
     }
 
-    // 12. Doa Sesudah Komuni (Slide 97)
+    // 12. Doa Sesudah Komuni (Slide 97 + duplicate slide right after if dynamically overflowed > 260 chars)
     else if (sNum === 97) {
-      slideXml = replacePlaceholdersInXml(slideXml, [mappedData.doaSesudahKomuni || ""]);
-      zip.file(slide.fileName, slideXml);
+      const originalSlideXml = slideXml;
+      const komuniChunks = splitTextIntoSlideChunks(
+        mappedData.doaSesudahKomuni || "",
+        260,
+      );
+      const filledSlide97Xml = replacePlaceholdersInXml(originalSlideXml, [
+        komuniChunks[0] || "",
+      ]);
+      zip.file(slide.fileName, filledSlide97Xml);
+
+      if (komuniChunks.length > 1) {
+        let lastRId = slide.rId;
+        for (let i = 1; i < komuniChunks.length; i++) {
+          const filledChunkXml = replacePlaceholdersInXml(originalSlideXml, [
+            komuniChunks[i],
+          ]);
+          const { newRId } = await duplicateSlide(97, lastRId, filledChunkXml);
+          lastRId = newRId;
+        }
+      }
     }
   }
 
