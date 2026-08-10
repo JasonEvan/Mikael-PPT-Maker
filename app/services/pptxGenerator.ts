@@ -49,6 +49,28 @@ function replacePlaceholdersInXml(
   });
 }
 
+// ponytail: remove entire <a:p> paragraph blocks matching text patterns to prevent empty lines at top
+function removeParagraphsInXml(
+  slideXml: string,
+  textPatterns: string[],
+): string {
+  return slideXml.replace(/<a:p>[\s\S]*?<\/a:p>/g, (pBlock) => {
+    const tMatches = pBlock.match(/<a:t[^>]*>(.*?)<\/a:t>/g) || [];
+    const fullText = tMatches
+      .map((t) => t.replace(/<[^>]+>/g, ""))
+      .join("")
+      .trim();
+
+    const shouldRemove = textPatterns.some((pat) =>
+      fullText.toLowerCase().includes(pat.toLowerCase()),
+    );
+    if (shouldRemove) {
+      return ""; // Completely strip paragraph block to avoid empty lines
+    }
+    return pBlock;
+  });
+}
+
 // ponytail: update speaker notes in ppt/notesSlides/notesSlideX.xml
 function updateNotesSlideXml(notesXml: string, notesText: string): string {
   if (!notesText) return notesXml;
@@ -68,7 +90,7 @@ function updateNotesSlideXml(notesXml: string, notesText: string): string {
   }
 }
 
-// ponytail: dynamically calculate overflow cut points for any text based on character limit & natural sentence/word boundaries
+// ponytail: dynamically calculate overflow cut points for any text based on character limit & punctuation boundaries (. , ! ? ;)
 function splitTextIntoSlideChunks(
   text: string,
   maxCharsPerSlide: number = 260,
@@ -87,21 +109,29 @@ function splitTextIntoSlideChunks(
   while (remaining.length > maxCharsPerSlide) {
     const slice = remaining.slice(0, maxCharsPerSlide);
 
-    // Look for last sentence boundary (. ! ?) in upper portion of slice
+    // Look for last punctuation boundary (. , ! ? ;) in upper portion of slice
     const periodIndex = slice.lastIndexOf(". ");
+    const commaIndex = slice.lastIndexOf(", ");
     const exclamIndex = slice.lastIndexOf("! ");
     const questIndex = slice.lastIndexOf("? ");
-    const lastSentenceEnd = Math.max(periodIndex, exclamIndex, questIndex);
+    const semiIndex = slice.lastIndexOf("; ");
+    const lastPunctuationEnd = Math.max(
+      periodIndex,
+      commaIndex,
+      exclamIndex,
+      questIndex,
+      semiIndex,
+    );
 
     let cutIndex = -1;
 
-    // Prefer cutting at sentence end if it occurs past 40% of maxCharsPerSlide
-    if (lastSentenceEnd > Math.floor(maxCharsPerSlide * 0.4)) {
-      cutIndex = lastSentenceEnd + 1; // Include period
+    // Prefer cutting at punctuation boundary if it occurs past 35% of maxCharsPerSlide
+    if (lastPunctuationEnd > Math.floor(maxCharsPerSlide * 0.35)) {
+      cutIndex = lastPunctuationEnd + 1; // Include punctuation mark
     } else {
       // Fallback: cut at last space (word boundary)
       const lastSpaceIndex = slice.lastIndexOf(" ");
-      if (lastSpaceIndex > Math.floor(maxCharsPerSlide * 0.4)) {
+      if (lastSpaceIndex > Math.floor(maxCharsPerSlide * 0.35)) {
         cutIndex = lastSpaceIndex;
       } else {
         // Fallback to exact limit
@@ -299,22 +329,52 @@ export async function generatePPTXBuffer(
       zip.file(slide.fileName, slideXml);
     }
 
-    // 2. Doa Kolekta (Slide 33 + duplicate slide right after if dynamically overflowed > 260 chars)
+    // 2. Doa Kolekta (Slide 33)
     else if (sNum === 33) {
       const originalSlideXml = slideXml;
       const kolektaChunks = splitTextIntoSlideChunks(
         mappedData.doaKolekta || "",
         260,
       );
-      const filledSlide33Xml = replacePlaceholdersInXml(originalSlideXml, [
-        kolektaChunks[0] || "",
-      ]);
-      zip.file(slide.fileName, filledSlide33Xml);
 
-      if (kolektaChunks.length > 1) {
+      if (kolektaChunks.length === 1) {
+        // Single slide: keep Marilah... and keep U Amin
+        const filledSlide33Xml = replacePlaceholdersInXml(originalSlideXml, [
+          kolektaChunks[0] || "",
+        ]);
+        zip.file(slide.fileName, filledSlide33Xml);
+      } else {
+        // Multi-slide duplication:
+        // Slide 1: Keep Marilah... & (hening...), REMOVE U Amin paragraph block completely
+        let slide1Xml = removeParagraphsInXml(originalSlideXml, [
+          "u\tamin",
+          "u amin",
+          "u  amin",
+        ]);
+        slide1Xml = replacePlaceholdersInXml(slide1Xml, [kolektaChunks[0]]);
+        zip.file(slide.fileName, slide1Xml);
+
         let lastRId = slide.rId;
         for (let i = 1; i < kolektaChunks.length; i++) {
-          const filledChunkXml = replacePlaceholdersInXml(originalSlideXml, [
+          const isLast = i === kolektaChunks.length - 1;
+          let dupSlideXml = originalSlideXml;
+
+          // Completely remove intro paragraph blocks so text starts at the VERY TOP of the duplicated slide!
+          dupSlideXml = removeParagraphsInXml(dupSlideXml, [
+            "marilah kita berdoa",
+            "hening sejenak",
+          ]);
+
+          // Remove U Amin for middle slides (keep U Amin ONLY on the last slide)
+          if (!isLast) {
+            dupSlideXml = removeParagraphsInXml(dupSlideXml, [
+              "u\tamin",
+              "u amin",
+              "u  amin",
+            ]);
+          }
+
+          const filledChunkXml = replacePlaceholdersInXml(dupSlideXml, [
             kolektaChunks[i],
           ]);
           const { newRId } = await duplicateSlide(33, lastRId, filledChunkXml);
@@ -465,22 +525,44 @@ export async function generatePPTXBuffer(
       zip.file(slide.fileName, slideXml);
     }
 
-    // 11. Doa Atas Persembahan (Slide 77 + duplicate slide right after if dynamically overflowed > 260 chars)
+    // 11. Doa Atas Persembahan (Slide 77)
     else if (sNum === 77) {
       const originalSlideXml = slideXml;
       const persembahanChunks = splitTextIntoSlideChunks(
         mappedData.doaAtasPersembahan || "",
         260,
       );
-      const filledSlide77Xml = replacePlaceholdersInXml(originalSlideXml, [
-        persembahanChunks[0] || "",
-      ]);
-      zip.file(slide.fileName, filledSlide77Xml);
 
-      if (persembahanChunks.length > 1) {
+      if (persembahanChunks.length === 1) {
+        const filledSlide77Xml = replacePlaceholdersInXml(originalSlideXml, [
+          persembahanChunks[0] || "",
+        ]);
+        zip.file(slide.fileName, filledSlide77Xml);
+      } else {
+        let slide1Xml = removeParagraphsInXml(originalSlideXml, [
+          "u\t: amin",
+          "u : amin",
+          "u: amin",
+          "amin",
+        ]);
+        slide1Xml = replacePlaceholdersInXml(slide1Xml, [persembahanChunks[0]]);
+        zip.file(slide.fileName, slide1Xml);
+
         let lastRId = slide.rId;
         for (let i = 1; i < persembahanChunks.length; i++) {
-          const filledChunkXml = replacePlaceholdersInXml(originalSlideXml, [
+          const isLast = i === persembahanChunks.length - 1;
+          let dupSlideXml = originalSlideXml;
+
+          if (!isLast) {
+            dupSlideXml = removeParagraphsInXml(dupSlideXml, [
+              "u\t: amin",
+              "u : amin",
+              "u: amin",
+              "amin",
+            ]);
+          }
+
+          const filledChunkXml = replacePlaceholdersInXml(dupSlideXml, [
             persembahanChunks[i],
           ]);
           const { newRId } = await duplicateSlide(77, lastRId, filledChunkXml);
@@ -489,22 +571,31 @@ export async function generatePPTXBuffer(
       }
     }
 
-    // 12. Doa Sesudah Komuni (Slide 97 + duplicate slide right after if dynamically overflowed > 260 chars)
+    // 12. Doa Sesudah Komuni (Slide 97)
     else if (sNum === 97) {
       const originalSlideXml = slideXml;
       const komuniChunks = splitTextIntoSlideChunks(
         mappedData.doaSesudahKomuni || "",
         260,
       );
-      const filledSlide97Xml = replacePlaceholdersInXml(originalSlideXml, [
-        komuniChunks[0] || "",
-      ]);
-      zip.file(slide.fileName, filledSlide97Xml);
 
-      if (komuniChunks.length > 1) {
+      if (komuniChunks.length === 1) {
+        zip.file(slide.fileName, slideXml);
+      } else {
+        const slide1Xml = replacePlaceholdersInXml(originalSlideXml, [
+          komuniChunks[0],
+        ]);
+        zip.file(slide.fileName, slide1Xml);
+
         let lastRId = slide.rId;
         for (let i = 1; i < komuniChunks.length; i++) {
-          const filledChunkXml = replacePlaceholdersInXml(originalSlideXml, [
+          let dupSlideXml = originalSlideXml;
+          dupSlideXml = removeParagraphsInXml(dupSlideXml, [
+            "marilah kita berdoa",
+            "hening sejenak",
+          ]);
+
+          const filledChunkXml = replacePlaceholdersInXml(dupSlideXml, [
             komuniChunks[i],
           ]);
           const { newRId } = await duplicateSlide(97, lastRId, filledChunkXml);
