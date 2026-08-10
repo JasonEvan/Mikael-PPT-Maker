@@ -49,25 +49,61 @@ function replacePlaceholdersInXml(
   });
 }
 
-// ponytail: remove entire <a:p> paragraph blocks matching text patterns to prevent empty lines at top
-function removeParagraphsInXml(
-  slideXml: string,
-  textPatterns: string[],
-): string {
-  return slideXml.replace(/<a:p>[\s\S]*?<\/a:p>/g, (pBlock) => {
-    const tMatches = pBlock.match(/<a:t[^>]*>(.*?)<\/a:t>/g) || [];
-    const fullText = tMatches
-      .map((t) => t.replace(/<[^>]+>/g, ""))
-      .join("")
-      .trim();
+// ponytail: helper to structurally remove all intro paragraphs appearing BEFORE the (teks) placeholder in txBody
+function stripIntroParagraphs(slideXml: string): string {
+  return slideXml.replace(/<p:txBody>[\s\S]*?<\/p:txBody>/g, (txBodyBlock) => {
+    const pBlocks = txBodyBlock.match(/<a:p>[\s\S]*?<\/a:p>/g) || [];
+    let placeholderIdx = -1;
 
-    const shouldRemove = textPatterns.some((pat) =>
-      fullText.toLowerCase().includes(pat.toLowerCase()),
-    );
-    if (shouldRemove) {
-      return ""; // Completely strip paragraph block to avoid empty lines
+    for (let i = 0; i < pBlocks.length; i++) {
+      const tMatches = pBlocks[i].match(/<a:t[^>]*>(.*?)<\/a:t>/g) || [];
+      const fullText = tMatches.map((t) => t.replace(/<[^>]+>/g, "")).join("");
+      if (/\(\s*teks\s*\)/i.test(fullText)) {
+        placeholderIdx = i;
+        break;
+      }
     }
-    return pBlock;
+
+    if (placeholderIdx <= 0) {
+      return txBodyBlock;
+    }
+
+    const remainingP = pBlocks.slice(placeholderIdx).join("");
+    return txBodyBlock.replace(/<a:p>[\s\S]*?<\/a:p>/g, (match, offset) => {
+      if (offset === txBodyBlock.indexOf("<a:p>")) {
+        return remainingP;
+      }
+      return "";
+    });
+  });
+}
+
+// ponytail: helper to structurally remove all closing/response paragraphs appearing AFTER the (teks) placeholder in txBody
+function stripClosingParagraphs(slideXml: string): string {
+  return slideXml.replace(/<p:txBody>[\s\S]*?<\/p:txBody>/g, (txBodyBlock) => {
+    const pBlocks = txBodyBlock.match(/<a:p>[\s\S]*?<\/a:p>/g) || [];
+    let placeholderIdx = -1;
+
+    for (let i = 0; i < pBlocks.length; i++) {
+      const tMatches = pBlocks[i].match(/<a:t[^>]*>(.*?)<\/a:t>/g) || [];
+      const fullText = tMatches.map((t) => t.replace(/<[^>]+>/g, "")).join("");
+      if (/\(\s*teks\s*\)/i.test(fullText)) {
+        placeholderIdx = i;
+        break;
+      }
+    }
+
+    if (placeholderIdx < 0 || placeholderIdx >= pBlocks.length - 1) {
+      return txBodyBlock;
+    }
+
+    const remainingP = pBlocks.slice(0, placeholderIdx + 1).join("");
+    return txBodyBlock.replace(/<a:p>[\s\S]*?<\/a:p>/g, (match, offset) => {
+      if (offset === txBodyBlock.indexOf("<a:p>")) {
+        return remainingP;
+      }
+      return "";
+    });
   });
 }
 
@@ -338,19 +374,15 @@ export async function generatePPTXBuffer(
       );
 
       if (kolektaChunks.length === 1) {
-        // Single slide: keep Marilah... and keep U Amin
+        // Single slide: keep template intact (has intro and closing)
         const filledSlide33Xml = replacePlaceholdersInXml(originalSlideXml, [
           kolektaChunks[0] || "",
         ]);
         zip.file(slide.fileName, filledSlide33Xml);
       } else {
         // Multi-slide duplication:
-        // Slide 1: Keep Marilah... & (hening...), REMOVE U Amin paragraph block completely
-        let slide1Xml = removeParagraphsInXml(originalSlideXml, [
-          "u\tamin",
-          "u amin",
-          "u  amin",
-        ]);
+        // Slide 1: Keep intro paragraphs before (teks), strip closing paragraphs after (teks)
+        let slide1Xml = stripClosingParagraphs(originalSlideXml);
         slide1Xml = replacePlaceholdersInXml(slide1Xml, [kolektaChunks[0]]);
         zip.file(slide.fileName, slide1Xml);
 
@@ -359,19 +391,12 @@ export async function generatePPTXBuffer(
           const isLast = i === kolektaChunks.length - 1;
           let dupSlideXml = originalSlideXml;
 
-          // Completely remove intro paragraph blocks so text starts at the VERY TOP of the duplicated slide!
-          dupSlideXml = removeParagraphsInXml(dupSlideXml, [
-            "marilah kita berdoa",
-            "hening sejenak",
-          ]);
+          // Structurally strip intro paragraphs before (teks) on duplicated slides
+          dupSlideXml = stripIntroParagraphs(dupSlideXml);
 
-          // Remove U Amin for middle slides (keep U Amin ONLY on the last slide)
+          // Structurally strip closing paragraphs on middle slides (keep closing on final slide)
           if (!isLast) {
-            dupSlideXml = removeParagraphsInXml(dupSlideXml, [
-              "u\tamin",
-              "u amin",
-              "u  amin",
-            ]);
+            dupSlideXml = stripClosingParagraphs(dupSlideXml);
           }
 
           const filledChunkXml = replacePlaceholdersInXml(dupSlideXml, [
@@ -539,12 +564,7 @@ export async function generatePPTXBuffer(
         ]);
         zip.file(slide.fileName, filledSlide77Xml);
       } else {
-        let slide1Xml = removeParagraphsInXml(originalSlideXml, [
-          "u\t: amin",
-          "u : amin",
-          "u: amin",
-          "amin",
-        ]);
+        let slide1Xml = stripClosingParagraphs(originalSlideXml);
         slide1Xml = replacePlaceholdersInXml(slide1Xml, [persembahanChunks[0]]);
         zip.file(slide.fileName, slide1Xml);
 
@@ -554,12 +574,7 @@ export async function generatePPTXBuffer(
           let dupSlideXml = originalSlideXml;
 
           if (!isLast) {
-            dupSlideXml = removeParagraphsInXml(dupSlideXml, [
-              "u\t: amin",
-              "u : amin",
-              "u: amin",
-              "amin",
-            ]);
+            dupSlideXml = stripClosingParagraphs(dupSlideXml);
           }
 
           const filledChunkXml = replacePlaceholdersInXml(dupSlideXml, [
@@ -580,7 +595,10 @@ export async function generatePPTXBuffer(
       );
 
       if (komuniChunks.length === 1) {
-        zip.file(slide.fileName, slideXml);
+        const filledSlide97Xml = replacePlaceholdersInXml(originalSlideXml, [
+          komuniChunks[0] || "",
+        ]);
+        zip.file(slide.fileName, filledSlide97Xml);
       } else {
         const slide1Xml = replacePlaceholdersInXml(originalSlideXml, [
           komuniChunks[0],
@@ -590,10 +608,7 @@ export async function generatePPTXBuffer(
         let lastRId = slide.rId;
         for (let i = 1; i < komuniChunks.length; i++) {
           let dupSlideXml = originalSlideXml;
-          dupSlideXml = removeParagraphsInXml(dupSlideXml, [
-            "marilah kita berdoa",
-            "hening sejenak",
-          ]);
+          dupSlideXml = stripIntroParagraphs(dupSlideXml);
 
           const filledChunkXml = replacePlaceholdersInXml(dupSlideXml, [
             komuniChunks[i],
