@@ -73,6 +73,14 @@ function toArray<T>(val: T | T[] | undefined | null): T[] {
   return Array.isArray(val) ? val : [val];
 }
 
+// ponytail: extract heading title text from runs that are bold AND NOT italic
+function getHeadingTitleText(p: LiturgyParagraph): string | null {
+  const titleRuns = p.runs.filter((r) => r.bold && !r.italic);
+  if (titleRuns.length === 0) return null;
+  const titleText = titleRuns.map((r) => r.text).join("").trim();
+  return titleText.length > 0 ? titleText : null;
+}
+
 // ponytail: extract text and run formatting from word/document.xml
 export async function parseDocxFile(file: File): Promise<DocxParseResult> {
   const arrayBuffer = await file.arrayBuffer();
@@ -85,10 +93,12 @@ export async function parseDocxFile(file: File): Promise<DocxParseResult> {
 
   const xmlContent = await documentXmlFile.async("text");
 
+  // ponytail: trimValues: false is critical to preserve spaces in text runs!
   const parser = new XMLParser({
     ignoreAttributes: false,
     attributeNamePrefix: "@_",
     parseTagValue: false,
+    trimValues: false,
   });
 
   const parsedXml = parser.parse(xmlContent);
@@ -117,7 +127,7 @@ export async function parseDocxFile(file: File): Promise<DocxParseResult> {
             rPr["w:b"] === "")
       );
 
-      // ponytail: fixed underline detection logic
+      // Underline detection logic
       const uVal = rPr?.["w:u"]?.["@_w:val"];
       const hasUnderline = Boolean(rPr && "w:u" in rPr) && uVal !== "none";
 
@@ -138,7 +148,7 @@ export async function parseDocxFile(file: File): Promise<DocxParseResult> {
           text = rNode["w:t"]["#text"];
         }
       } else if (rNode["w:tab"]) {
-        text = "\t";
+        text = " ";
       } else if (rNode["w:br"]) {
         text = "\n";
       }
@@ -153,10 +163,25 @@ export async function parseDocxFile(file: File): Promise<DocxParseResult> {
       }
     }
 
-    const rawText = runs.map((r) => r.text).join("").trim();
+    let rawText = runs.map((r) => r.text).join("");
+
+    // ponytail: check if paragraph uses Word auto-numbering (w:numPr)
+    const pPr = pNode["w:pPr"];
+    const hasNumPr = Boolean(pPr && ("w:numPr" in pPr || "w:outlineLvl" in pPr));
+
+    // ponytail: strip Word auto-numbering prefixes if numPr present or if fused like "1.HARI"
+    if (hasNumPr || /^\d+\.[A-Za-z\u00C0-\u024F]/.test(rawText.trim())) {
+      rawText = rawText.trim().replace(/^\d+\.\s*/, "");
+    } else {
+      rawText = rawText.trim();
+    }
+
+    // ponytail: normalize fused speaker labels (e.g. "L.Bacaan" -> "L. Bacaan", "I.Inilah" -> "I. Inilah")
+    rawText = rawText.replace(/^([LI])\.\s*([A-Za-z])/i, "$1. $2");
+    // ponytail: fix fused words like "dariKitab" -> "dari Kitab"
+    rawText = rawText.replace(/([a-z])Kitab/g, "$1 Kitab");
+
     if (rawText.length > 0) {
-      // Paragraph properties fallback
-      const pPr = pNode["w:pPr"];
       const pStyle = pPr?.["w:pStyle"]?.["@_w:val"] || "";
       const isHeading = pStyle.toLowerCase().includes("heading");
 
@@ -186,21 +211,23 @@ export async function parseDocxFile(file: File): Promise<DocxParseResult> {
   };
 }
 
-// ponytail: section classifier based on bold/underline headers
-function groupIntoSections(paragraphs: LiturgyParagraph[]): ParsedLiturgySection[] {
+// ponytail: section classifier using run-level bold-and-not-italic title extraction
+function groupIntoSections(
+  paragraphs: LiturgyParagraph[],
+): ParsedLiturgySection[] {
   const sections: ParsedLiturgySection[] = [];
   let currentSection: ParsedLiturgySection | null = null;
 
   for (let i = 0; i < paragraphs.length; i++) {
     const p = paragraphs[i];
-    const textUpper = p.rawText.toUpperCase();
 
     // 1. Major Section Header (Bold + Underline)
     if (p.isBold && p.isUnderline) {
       if (currentSection) sections.push(currentSection);
+      const cleanMajorTitle = getHeadingTitleText(p) || p.rawText;
       currentSection = {
         id: `section-${sections.length + 1}`,
-        title: p.rawText,
+        title: cleanMajorTitle,
         type: "major_header",
         paragraphs: [p],
         body: [],
@@ -208,25 +235,46 @@ function groupIntoSections(paragraphs: LiturgyParagraph[]): ParsedLiturgySection
       continue;
     }
 
-    // 2. Sub-Section Header (Bold only, not underlined, not italic)
-    // ponytail: added !p.isItalic to avoid false positives on short bold+italic responses
-    if (p.isBold && !p.isUnderline && !p.isItalic && p.rawText.length < 80) {
+    const headingTitle = getHeadingTitleText(p);
+
+    // ponytail: check if headingTitle is a bare speaker label (e.g. "U", "L.", "I:")
+    const isJustSpeakerLabel =
+      headingTitle !== null && /^[ULI][.:]?$/i.test(headingTitle.trim());
+
+    // ponytail: check if paragraph is a reading citation line (e.g. "L. Bacaan dari...", "I. Inilah Injil...")
+    const isCitationLine =
+      headingTitle !== null &&
+      /^[LI][\s.]?/i.test(headingTitle.trim()) &&
+      (headingTitle.includes("Bacaan dari") ||
+        headingTitle.includes("Inilah Injil") ||
+        p.rawText.includes("Bacaan dari") ||
+        p.rawText.includes("Inilah Injil"));
+
+    // 2. Sub-Section Header condition
+    const shouldOpenNewSection =
+      headingTitle !== null &&
+      headingTitle.length < 80 &&
+      !isJustSpeakerLabel &&
+      !(currentSection?.type === "reading" && isCitationLine);
+
+    if (shouldOpenNewSection) {
       if (currentSection) sections.push(currentSection);
 
+      const titleUpper = headingTitle.toUpperCase();
       let type: ParsedLiturgySection["type"] = "sub_header";
-      if (textUpper.includes("BACAAN") || textUpper.includes("INJIL")) {
+      if (titleUpper.includes("BACAAN") || titleUpper.includes("INJIL")) {
         type = "reading";
-      } else if (textUpper.includes("MAZMUR")) {
+      } else if (titleUpper.includes("MAZMUR")) {
         type = "psalm";
-      } else if (textUpper.includes("DOA UMAT")) {
+      } else if (titleUpper.includes("DOA UMAT")) {
         type = "doa_umat";
-      } else if (textUpper.includes("DOA")) {
+      } else if (titleUpper.includes("DOA")) {
         type = "prayer";
       }
 
       currentSection = {
         id: `section-${sections.length + 1}`,
-        title: p.rawText,
+        title: headingTitle,
         type,
         paragraphs: [p],
         body: [],
@@ -255,7 +303,7 @@ function groupIntoSections(paragraphs: LiturgyParagraph[]): ParsedLiturgySection
     sections.push(currentSection);
   }
 
-  // Refine section data (epigraph, citation, intentions)
+  // Refine section details (epigraph, citation, intentions)
   return sections.map((sec) => processSectionDetails(sec));
 }
 
@@ -286,13 +334,13 @@ function processSectionDetails(section: ParsedLiturgySection): ParsedLiturgySect
       result.epigraph = epigraphLines.join(" ");
     }
 
-    // Citation line (bold line with Bacaan dari / Inilah Injil / speaker label L)
+    // Citation line (bold line starting with L. / I. or containing Bacaan dari / Inilah Injil)
     const citationP = section.paragraphs.find(
       (p) =>
         p.isBold &&
         (p.rawText.includes("Bacaan dari") ||
           p.rawText.includes("Inilah Injil") ||
-          /^L[\s.]/.test(p.rawText))
+          /^[LI][\s.]/i.test(p.rawText))
     );
     if (citationP) {
       result.citation = citationP.rawText;
@@ -302,7 +350,6 @@ function processSectionDetails(section: ParsedLiturgySection): ParsedLiturgySect
     const bodyLines = section.paragraphs
       .filter(
         (p) =>
-          !p.isBold &&
           !epigraphParagraphs.includes(p) &&
           p !== citationP &&
           p.rawText !== section.title
@@ -317,8 +364,7 @@ function processSectionDetails(section: ParsedLiturgySection): ParsedLiturgySect
     let currentBody: string[] = [];
 
     for (const p of section.paragraphs) {
-      // ponytail: regex /^L[\s.]/ for robust intention title matching
-      if (p.isBold && /^L[\s.]/.test(p.rawText)) {
+      if (p.isBold && /^L[\s.]/i.test(p.rawText)) {
         if (currentTitle) {
           intentions.push({ title: currentTitle, body: currentBody.join(" ") });
         }
@@ -385,7 +431,6 @@ export function selectRelevantSections(parsed: DocxParseResult): MappedLiturgyDa
 
     // 4. Mazmur Tanggapan
     if (titleNorm.includes("MAZMUR") && !mappedData.mazmurTanggapan) {
-      // Collect numbered verses (bait)
       const verses: string[] = [];
       const nonHeaderParagraphs = sec.paragraphs.filter((p) => p.rawText !== sec.title);
       let currentVerse = "";
@@ -427,7 +472,6 @@ export function selectRelevantSections(parsed: DocxParseResult): MappedLiturgyDa
 
     // 6. Bacaan Injil
     if ((titleNorm.includes("INJIL") || titleNorm.includes("BACAAN INJIL")) && !mappedData.bacaanInjil) {
-      // Extract gospel name / book citation (e.g. Matius 14:22-33)
       let gospelName = "";
       const match = sec.citation?.match(/(Matius|Markus|Lukas|Yohanes)\s+\d+:[0-9a-z.-]+/i);
       if (match) {
@@ -449,8 +493,8 @@ export function selectRelevantSections(parsed: DocxParseResult): MappedLiturgyDa
     // 7. Doa Umat
     if (titleNorm.includes("DOA UMAT") && !mappedData.doaUmat) {
       const nonHeaderParagraphs = sec.paragraphs.filter((p) => p.rawText !== sec.title);
-      const introP = nonHeaderParagraphs.find((p) => !p.isBold || !/^L[\s.]/.test(p.rawText));
-      const closingP = nonHeaderParagraphs.slice(-1).find((p) => !/^L[\s.]/.test(p.rawText) && p !== introP);
+      const introP = nonHeaderParagraphs.find((p) => !p.isBold || !/^L[\s.]/i.test(p.rawText));
+      const closingP = nonHeaderParagraphs.slice(-1).find((p) => !/^L[\s.]/i.test(p.rawText) && p !== introP);
 
       mappedData.doaUmat = {
         intro: introP?.rawText,
