@@ -32,6 +32,19 @@ function cleanCitation(citation?: string): string {
   return cleaned;
 }
 
+// ponytail: helper to check if a slide XML contains a (teks) placeholder
+function slideHasPlaceholder(slideXml: string): boolean {
+  const pMatches = slideXml.match(/<a:p>[\s\S]*?<\/a:p>/g) || [];
+  for (const p of pMatches) {
+    const tMatches = p.match(/<a:t[^>]*>(.*?)<\/a:t>/g) || [];
+    const text = tMatches.map((t) => t.replace(/<[^>]+>/g, "")).join("");
+    if (/\(\s*teks\s*\)/i.test(text)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // ponytail: replace placeholders ( (teks) or (teks) ) in slide XML, handling run-splitting
 function replacePlaceholdersInXml(
   slideXml: string,
@@ -277,9 +290,9 @@ export async function generatePPTXBuffer(
   );
   let maxSldId = Math.max(256, ...sldIdNums);
 
-  // ponytail: helper to duplicate a slide cleanly and insert it IMMEDIATELY AFTER targetRId
+  // ponytail: helper to duplicate a slide cleanly by exact sourceFileName, inserting IMMEDIATELY AFTER targetRId
   const duplicateSlide = async (
-    sourceSlideNum: number,
+    sourceFileName: string,
     targetRId: string,
     customXml?: string,
   ): Promise<{ newSlideNum: number; newFileName: string; newRId: string }> => {
@@ -288,15 +301,19 @@ export async function generatePPTXBuffer(
     maxRId++;
     const newSlideNum = maxSlideNum;
     const newFileName = `ppt/slides/slide${newSlideNum}.xml`;
-    const sourceFileName = `ppt/slides/slide${sourceSlideNum}.xml`;
     const newRId = `rId${maxRId}`;
 
     const xmlToWrite =
       customXml || (await zip.file(sourceFileName)?.async("text"));
     if (xmlToWrite) zip.file(newFileName, xmlToWrite);
 
-    const sourceRels = `ppt/slides/_rels/slide${sourceSlideNum}.xml.rels`;
+    // Compute sourceRels from sourceFileName
+    const relsFileName = sourceFileName
+      .replace(/^ppt\/slides\//, "")
+      .replace(/\.xml$/, ".xml.rels");
+    const sourceRels = `ppt/slides/_rels/${relsFileName}`;
     const sourceRelsFile = zip.file(sourceRels);
+
     if (sourceRelsFile) {
       let relsXml = await sourceRelsFile.async("text");
       // Strip notesSlide relationship from duplicated slide to prevent OpenXML schema collision
@@ -346,7 +363,7 @@ export async function generatePPTXBuffer(
     return { newSlideNum, newFileName, newRId };
   };
 
-  // ponytail: process each slide placeholder according to MVP scope
+  // ponytail: process each slide placeholder using Content Slide filtering + Heading Text Anchors
   for (const slide of slideOrder) {
     const sNum = slide.index;
 
@@ -364,6 +381,20 @@ export async function generatePPTXBuffer(
     if (!slideZip) continue;
 
     let slideXml = await slideZip.async("text");
+
+    // Only process content slides that actually contain a (teks) placeholder
+    const hasPlaceholder = slideHasPlaceholder(slideXml);
+    if (!hasPlaceholder) continue;
+
+    // Extract visible slide text to anchor slide type by heading content
+    const pMatches = slideXml.match(/<a:p>[\s\S]*?<\/a:p>/g) || [];
+    const slideTextUpper = pMatches
+      .map((p) => {
+        const tMatches = p.match(/<a:t[^>]*>(.*?)<\/a:t>/g) || [];
+        return tMatches.map((t) => t.replace(/<[^>]+>/g, "")).join("");
+      })
+      .join(" ")
+      .toUpperCase();
 
     // 1. Seruan Tobat (Slides 22, 23, 24)
     if (sNum === 22) {
@@ -383,8 +414,8 @@ export async function generatePPTXBuffer(
       zip.file(slide.fileName, slideXml);
     }
 
-    // 2. Doa Kolekta (Slide 33)
-    else if (sNum === 33) {
+    // 2. Doa Kolekta (Content Slide with (teks) placeholder)
+    else if (slideTextUpper.includes("MARILAH KITA BERDOA") && sNum <= 35) {
       const originalSlideXml = slideXml;
       const kolektaChunks = splitTextIntoSlideChunks(
         mappedData.doaKolekta || "",
@@ -420,14 +451,21 @@ export async function generatePPTXBuffer(
           const filledChunkXml = replacePlaceholdersInXml(dupSlideXml, [
             kolektaChunks[i],
           ]);
-          const { newRId } = await duplicateSlide(33, lastRId, filledChunkXml);
+          const { newRId } = await duplicateSlide(
+            slide.fileName,
+            lastRId,
+            filledChunkXml,
+          );
           lastRId = newRId;
         }
       }
     }
 
-    // 3. Bacaan Pertama (Slide 35 + notesSlide2.xml)
-    else if (sNum === 35) {
+    // 3. Bacaan Pertama (Content Slide with (teks) placeholder + notesSlide2.xml)
+    else if (
+      slideTextUpper.includes("BACAAN PERTAMA") ||
+      slideTextUpper.includes("BACAAN I ")
+    ) {
       const epigraph = formatEpigraph(mappedData.bacaanPertama?.epigraph);
       const citation = cleanCitation(mappedData.bacaanPertama?.citation);
       slideXml = replacePlaceholdersInXml(slideXml, [epigraph, citation]);
@@ -470,14 +508,21 @@ export async function generatePPTXBuffer(
           const filledVerseXml = replacePlaceholdersInXml(originalSlideXml, [
             verses[i],
           ]);
-          const { newRId } = await duplicateSlide(43, lastRId, filledVerseXml);
+          const { newRId } = await duplicateSlide(
+            slide.fileName,
+            lastRId,
+            filledVerseXml,
+          );
           lastRId = newRId;
         }
       }
     }
 
-    // 5. Bacaan Kedua (Slide 46 + notesSlide3.xml)
-    else if (sNum === 46) {
+    // 5. Bacaan Kedua (Content Slide with (teks) placeholder + notesSlide3.xml)
+    else if (
+      slideTextUpper.includes("BACAAN KEDUA") ||
+      slideTextUpper.includes("BACAAN II ")
+    ) {
       const epigraph = formatEpigraph(mappedData.bacaanKedua?.epigraph);
       const citation = cleanCitation(mappedData.bacaanKedua?.citation);
       slideXml = replacePlaceholdersInXml(slideXml, [epigraph, citation]);
@@ -503,8 +548,8 @@ export async function generatePPTXBuffer(
       zip.file(slide.fileName, slideXml);
     }
 
-    // 7. Bacaan Injil - Epigraph & Citation (Slide 51 + notesSlide6.xml)
-    else if (sNum === 51) {
+    // 7. Bacaan Injil - Epigraph & Citation (Content Slide with (teks) placeholder + notesSlide6.xml)
+    else if (slideTextUpper.includes("INJIL")) {
       const epigraph = formatEpigraph(mappedData.bacaanInjil?.epigraph);
       const citation = cleanCitation(mappedData.bacaanInjil?.citation);
       slideXml = replacePlaceholdersInXml(slideXml, [epigraph, citation]);
@@ -551,7 +596,7 @@ export async function generatePPTXBuffer(
             [intentions[i].title, intentions[i].body],
           );
           const { newRId } = await duplicateSlide(
-            69,
+            slide.fileName,
             lastRId,
             filledIntentionXml,
           );
@@ -568,8 +613,11 @@ export async function generatePPTXBuffer(
       zip.file(slide.fileName, slideXml);
     }
 
-    // 11. Doa Atas Persembahan (Slide 77)
-    else if (sNum === 77) {
+    // 11. Doa Atas Persembahan (Content Slide with (teks) placeholder)
+    else if (
+      slideTextUpper.includes("DOA ATAS PERSEMBAHAN") ||
+      slideTextUpper.includes("ATAS PERSEMBAHAN")
+    ) {
       const originalSlideXml = slideXml;
       const persembahanChunks = splitTextIntoSlideChunks(
         mappedData.doaAtasPersembahan || "",
@@ -598,14 +646,21 @@ export async function generatePPTXBuffer(
           const filledChunkXml = replacePlaceholdersInXml(dupSlideXml, [
             persembahanChunks[i],
           ]);
-          const { newRId } = await duplicateSlide(77, lastRId, filledChunkXml);
+          const { newRId } = await duplicateSlide(
+            slide.fileName,
+            lastRId,
+            filledChunkXml,
+          );
           lastRId = newRId;
         }
       }
     }
 
-    // 12. Doa Sesudah Komuni (Slide 97)
-    else if (sNum === 97) {
+    // 12. Doa Sesudah Komuni (Content Slide with (teks) placeholder)
+    else if (
+      slideTextUpper.includes("DOA SESUDAH KOMUNI") ||
+      slideTextUpper.includes("SESUDAH KOMUNI")
+    ) {
       const originalSlideXml = slideXml;
       const komuniChunks = splitTextIntoSlideChunks(
         mappedData.doaSesudahKomuni || "",
@@ -631,7 +686,11 @@ export async function generatePPTXBuffer(
           const filledChunkXml = replacePlaceholdersInXml(dupSlideXml, [
             komuniChunks[i],
           ]);
-          const { newRId } = await duplicateSlide(97, lastRId, filledChunkXml);
+          const { newRId } = await duplicateSlide(
+            slide.fileName,
+            lastRId,
+            filledChunkXml,
+          );
           lastRId = newRId;
         }
       }
