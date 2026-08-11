@@ -334,6 +334,88 @@ function parseDoaUmatData(section: ParsedLiturgySection): MappedDoaUmat {
   };
 }
 
+// ponytail: helper to strip trailing invocation ending phrases like "Tuhan, kasihanilah kami" or "Kristus, kasihanilah kami"
+function stripTobatInvocationEnding(text: string): string {
+  if (!text) return "";
+  let cleaned = text.trim();
+  cleaned = cleaned
+    .replace(/[\s,.-]*(?:Tuhan|Kristus)[\s,.-]*kasihanilah\s*kami[\s.]*$/gi, "")
+    .trim();
+  return cleaned;
+}
+
+// ponytail: helper to parse Seruan Tobat items (capturing at most 3 priest "I" prayers, stripping trailing kasihanilah kami)
+function parseSeruanTobatLines(lines: string[]): string[] {
+  const tobatItems: string[] = [];
+  let currentItemLines: string[] = [];
+
+  for (const rawLine of lines) {
+    const trimmed = rawLine.trim();
+    if (!trimmed) continue;
+
+    // Filter out section title and posture annotations
+    if (
+      /^tobat|^seruan\s*tobat/i.test(trimmed) &&
+      (/\(\s*umat/i.test(trimmed) || trimmed.split(/\s+/).length <= 3)
+    )
+      continue;
+    if (/^\(\s*umat\s*(?:berdiri|duduk|berlutut)\s*\)$/i.test(trimmed))
+      continue;
+
+    // Stop at Priest Absolusi conclusion prayer (e.g. "Semoga Allah yang Mahakuasa...")
+    if (
+      /^semoga\s+allah/i.test(trimmed) ||
+      /mengampuni\s+dosa/i.test(trimmed)
+    ) {
+      break;
+    }
+
+    // Check if line is Congregation response (U. ...)
+    if (isCongregationResponse(trimmed)) {
+      if (currentItemLines.length > 0) {
+        const fullItemText = currentItemLines.join(" ").trim();
+        const cleanedText = stripTobatInvocationEnding(fullItemText);
+        if (cleanedText) {
+          tobatItems.push(cleanedText);
+        }
+        currentItemLines = [];
+      }
+      if (tobatItems.length >= 3) break;
+      continue;
+    }
+
+    // Check if line starts with Priest speaker prefix (I. / I / Imam)
+    const isPriestPrefix = /^(?:[I][.:\s\t]*|Imam[.:\s\t]*)/i.test(trimmed);
+    if (isPriestPrefix && currentItemLines.length > 0) {
+      const fullItemText = currentItemLines.join(" ").trim();
+      const cleanedText = stripTobatInvocationEnding(fullItemText);
+      if (cleanedText) {
+        tobatItems.push(cleanedText);
+      }
+      currentItemLines = [];
+    }
+
+    if (tobatItems.length >= 3) break;
+
+    // Line spoken by Priest (I. ...) or continuation line before U
+    const cleanLine = stripSpeakerPrefix(trimmed);
+    if (cleanLine) {
+      currentItemLines.push(cleanLine);
+    }
+  }
+
+  // Trailing item if any
+  if (currentItemLines.length > 0 && tobatItems.length < 3) {
+    const fullItemText = currentItemLines.join(" ").trim();
+    const cleanedText = stripTobatInvocationEnding(fullItemText);
+    if (cleanedText) {
+      tobatItems.push(cleanedText);
+    }
+  }
+
+  return tobatItems.slice(0, 3);
+}
+
 // ponytail: helper to clean reading notes body text (excluding header, epigraph, citation, dialogue greetings, Demikianlah sabda Tuhan, U Syukur kepada Allah)
 function cleanReadingNotesBody(lines: string[], epigraph?: string): string {
   const normEpigraph = epigraph
@@ -750,7 +832,9 @@ export function selectRelevantSections(
       (titleNorm.includes("TOBAT") && !mappedData.seruanTobat)
     ) {
       const lines = sec.body?.filter((b) => b !== sec.title) || [];
-      mappedData.seruanTobat = lines.slice(0, 3);
+      const parsedTobat = parseSeruanTobatLines(lines);
+      mappedData.seruanTobat =
+        parsedTobat.length > 0 ? parsedTobat : lines.slice(0, 3);
       mappedSectionIds.add(sec.id);
       continue;
     }

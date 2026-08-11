@@ -143,10 +143,13 @@ matching rule handles the slide.
 Any placeholder slide whose text contains `"PENGUMUMAN"` or
 `"LIRIK LAGU"` is skipped entirely, untouched.
 
-### 1. Seruan Tobat
-
-- **Anchor**: slide text contains `"KASIHANILAH KAMI"`.
-- **Fill**: `mappedData.seruanTobat[seruanCount]` into the single
+#### 1. Seruan Tobat
+- **Anchor**: Slide text containing `"KASIHANILAH KAMI"`.
+- **Parser Logic (`parseSeruanTobatLines` & `stripTobatInvocationEnding`)**:
+  - Scans all lines in the Tobat section and groups priest prayers (`I. ...`), capping at **at most 3 items** (`slice(0, 3)`), stopping before the Absolusi prayer (`Semoga Allah...`).
+  - Strips trailing invocation ending phrases (`Tuhan, kasihanilah kami` / `Kristus, kasihanilah kami`) as they are already present on the template slides.
+  - Filters out congregation response lines (`U. ...`) so that **only Priest ("I") invocation text** is captured into `mappedData.seruanTobat[0..2]`.
+- **Fill Logic**: Fills each captured priest prayer item sequentially into corresponding slides.
   placeholder; `seruanCount` increments each time this rule fires, so
   each matching slide gets the next item in order. If there are more
   matching slides than array items, later slides get an empty string.
