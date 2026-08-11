@@ -91,18 +91,25 @@ function getHeadingTitleText(p: LiturgyParagraph): string | null {
   return titleText.length > 0 ? titleText : null;
 }
 
-// ponytail: helper to clean formula lines (Marilah kita berdoa, U. Amin) from prayer bodies
+// ponytail: helper to clean formula lines and strip speaker prefixes (I., I, I:, Imam, L., etc.) from prayer bodies
 function cleanPrayerBody(lines: string[]): string {
-  const filtered = lines.filter((line) => {
-    const trimmed = line.trim();
-    if (!trimmed) return false;
-    if (/^I[\s.]*Marilah/i.test(trimmed)) return false;
-    if (/^Marilah kita berdoa/i.test(trimmed)) return false;
-    if (/^\(?hening sejenak\)?$/i.test(trimmed)) return false;
-    if (/^U[\s.]*Amin/i.test(trimmed)) return false;
-    if (/^Amin\.?$/i.test(trimmed)) return false;
-    return true;
-  });
+  const filtered = lines
+    .filter((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return false;
+      if (/^I[\s.]*Marilah/i.test(trimmed)) return false;
+      if (/^Marilah kita berdoa/i.test(trimmed)) return false;
+      if (/^\(?hening sejenak\)?$/i.test(trimmed)) return false;
+      if (/^U[\s.]*Amin/i.test(trimmed)) return false;
+      if (/^Amin\.?$/i.test(trimmed)) return false;
+      return true;
+    })
+    .map((line) => {
+      let cleaned = line.trim();
+      cleaned = cleaned.replace(/^(?:I|Imam|L|Lektor)[.:\s\t]+/i, "");
+      cleaned = cleaned.replace(/^(?:I|Imam|L|Lektor)[.:]/i, "");
+      return cleaned.trim();
+    });
   return filtered.join("\n\n").trim();
 }
 
