@@ -243,7 +243,7 @@ function updateNotesSlideXml(notesXml: string, notesText: string): string {
 // ponytail: dynamically calculate overflow cut points for any text based on character limit & punctuation boundaries (. , ! ? ;)
 function splitTextIntoSlideChunks(
   text: string,
-  maxCharsPerSlide: number = 260,
+  maxCharsPerSlide: number = 320,
 ): string[] {
   if (!text || text.trim().length === 0) return [""];
   const trimmed = text.trim();
@@ -487,6 +487,8 @@ export async function generatePPTXBuffer(
   let hasHandledDoaUmatIntro = false;
   let hasHandledDoaUmatIntentions = false;
   let hasHandledDoaUmatOutro = false;
+  let hasPassedDoaKomuniTitle = false;
+  let hasHandledDoaKomuni = false;
 
   // ponytail: process each slide placeholder using Content Slide filtering + Content Pattern Anchors (ZERO slide index dependency)
   for (const slide of slideOrder) {
@@ -512,6 +514,15 @@ export async function generatePPTXBuffer(
       !slideTextUpper.includes("AMIN")
     ) {
       hasPassedDoaUmatTitle = true;
+    }
+
+    // Check if slide is Doa Sesudah Komuni Title slide (Slide 91: DOA SESUDAH KOMUNI)
+    if (
+      !hasPassedDoaKomuniTitle &&
+      (slideTextUpper.includes("DOA SESUDAH KOMUNI") ||
+        slideTextUpper.includes("SESUDAH KOMUNI"))
+    ) {
+      hasPassedDoaKomuniTitle = true;
     }
 
     // Track Bacaan Pertama & Bacaan Kedua titles
@@ -912,7 +923,7 @@ export async function generatePPTXBuffer(
       const originalSlideXml = slideXml;
       const persembahanChunks = splitTextIntoSlideChunks(
         mappedData.doaAtasPersembahan || "",
-        260,
+        240,
       );
 
       if (persembahanChunks.length === 1) {
@@ -947,15 +958,16 @@ export async function generatePPTXBuffer(
       }
     }
 
-    // 12. Doa Sesudah Komuni Content Slide
+    // 12. Doa Sesudah Komuni Content Slide (Slide 92: right after DOA SESUDAH KOMUNI title slide)
     else if (
+      (hasPassedDoaKomuniTitle && !hasHandledDoaKomuni) ||
       slideTextUpper.includes("DOA SESUDAH KOMUNI") ||
       slideTextUpper.includes("SESUDAH KOMUNI")
     ) {
       const originalSlideXml = slideXml;
       const komuniChunks = splitTextIntoSlideChunks(
         mappedData.doaSesudahKomuni || "",
-        260,
+        280,
       );
 
       if (komuniChunks.length === 1) {
@@ -985,6 +997,8 @@ export async function generatePPTXBuffer(
           lastRId = newRId;
         }
       }
+      hasHandledDoaKomuni = true;
+      hasPassedDoaKomuniTitle = false;
     }
   }
 
