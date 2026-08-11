@@ -14,14 +14,22 @@ function escapeXml(str: string): string {
     .replace(/'/g, "&apos;");
 }
 
-// ponytail: format epigraph wrapped in quotation marks “...”
+// ponytail: format epigraph wrapped cleanly in quotation marks “...”
 function formatEpigraph(epigraph?: string): string {
   if (!epigraph || !epigraph.trim()) return "";
-  const trimmed = epigraph.trim();
-  if (trimmed.startsWith("“") || trimmed.startsWith('"')) {
-    return trimmed;
+  let cleaned = epigraph.trim();
+
+  while (
+    /^[*\s"“'”‘’`«»]/.test(cleaned) ||
+    /[*\s"“'”‘’`«»]$/.test(cleaned)
+  ) {
+    cleaned = cleaned
+      .replace(/^[*\s"“'”‘’`«»]+|[*\s"“'”‘’`«»]+$/g, "")
+      .trim();
   }
-  return `“${trimmed}”`;
+
+  if (!cleaned) return "";
+  return `“${cleaned}”`;
 }
 
 // ponytail: helper to strip leading L / I / L. / I. / Inilah / nilah prefix from reading citations

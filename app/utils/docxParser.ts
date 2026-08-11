@@ -854,8 +854,19 @@ function processSectionDetails(
         p.rawText.endsWith('"') ||
         p.rawText.endsWith("”")
       ) {
-        epigraphLines.push(p.rawText.replace(/^[*"“']|["”'*]$/g, "").trim());
-        epigraphParagraphs.push(p);
+        let cleanEpigraphLine = p.rawText.trim();
+        while (
+          /^[*\s"“'”‘’`«»]/.test(cleanEpigraphLine) ||
+          /[*\s"“'”‘’`«»]$/.test(cleanEpigraphLine)
+        ) {
+          cleanEpigraphLine = cleanEpigraphLine
+            .replace(/^[*\s"“'”‘’`«»]+|[*\s"“'”‘’`«»]+$/g, "")
+            .trim();
+        }
+        if (cleanEpigraphLine) {
+          epigraphLines.push(cleanEpigraphLine);
+          epigraphParagraphs.push(p);
+        }
       }
     }
 
