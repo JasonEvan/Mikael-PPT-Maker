@@ -91,16 +91,51 @@ function getHeadingTitleText(p: LiturgyParagraph): string | null {
   return titleText.length > 0 ? titleText : null;
 }
 
-// ponytail: helper to clean formula lines and strip speaker prefixes (I., I, I:, Imam, L., etc.) from prayer bodies
-function cleanPrayerBody(lines: string[]): string {
-  const filtered = lines
+// ponytail: helper to clean formula lines, posture titles, and strip speaker prefixes from prayer bodies
+function cleanPrayerBody(lines: string[], sectionTitle?: string): string {
+  // Find index of congregation response (U. Amin / Amin)
+  let aminIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (/^U[\s.:]*Amin/i.test(trimmed) || /^Amin\.?$/i.test(trimmed)) {
+      aminIdx = i;
+      break;
+    }
+  }
+
+  // If U. Amin was found, ignore all lines after U. Amin
+  const targetLines = aminIdx !== -1 ? lines.slice(0, aminIdx) : lines;
+
+  const filtered = targetLines
     .filter((line) => {
       const trimmed = line.trim();
       if (!trimmed) return false;
-      if (/^I[\s.]*Marilah/i.test(trimmed)) return false;
-      if (/^Marilah kita berdoa/i.test(trimmed)) return false;
-      if (/^\(?hening sejenak\)?$/i.test(trimmed)) return false;
-      if (/^U[\s.]*Amin/i.test(trimmed)) return false;
+
+      // Filter out section title if present in body
+      if (sectionTitle && trimmed.toLowerCase() === sectionTitle.toLowerCase())
+        return false;
+      if (
+        /^(?:DOA\s+)?(KOLEKTA|ATAS\s+PERSEMBAHAN|SESUDAH\s+KOMUNI)\s*(\(.*\))?$/i.test(
+          trimmed,
+        )
+      )
+        return false;
+
+      // Filter out posture annotations alone e.g. "(umat berdiri)"
+      if (/^\(?umat\s*(berdiri|duduk|berlutut)\)?$/i.test(trimmed))
+        return false;
+
+      // Filter out intro prompt lines: Marilah kita berdoa / Mari kita berdoa / Mari kita berdoa bersama / hening sejenak
+      if (
+        /^(?:[LI][.:\s\t]*|(?:Imam|Lektor)[.:\s\t]*)?Mari(?:lah)?\b.*berdoa/i.test(
+          trimmed,
+        )
+      )
+        return false;
+      if (/^\(?hening\s+sejenak\)?$/i.test(trimmed)) return false;
+
+      // Filter out U. Amin / Amin
+      if (/^U[\s.:]*Amin/i.test(trimmed)) return false;
       if (/^Amin\.?$/i.test(trimmed)) return false;
       return true;
     })
@@ -110,6 +145,7 @@ function cleanPrayerBody(lines: string[]): string {
       cleaned = cleaned.replace(/^(?:I|Imam|L|Lektor)[.:]/i, "");
       return cleaned.trim();
     });
+
   return filtered.join("\n\n").trim();
 }
 
@@ -729,7 +765,7 @@ export function selectRelevantSections(
       (titleNorm.includes("KOLEKTA") && !mappedData.doaKolekta)
     ) {
       const lines = sec.body?.filter((b) => b !== sec.title) || [];
-      mappedData.doaKolekta = cleanPrayerBody(lines);
+      mappedData.doaKolekta = cleanPrayerBody(lines, sec.title);
       mappedSectionIds.add(sec.id);
       continue;
     }
@@ -822,7 +858,7 @@ export function selectRelevantSections(
       !mappedData.doaAtasPersembahan
     ) {
       const lines = sec.body?.filter((b) => b !== sec.title) || [];
-      mappedData.doaAtasPersembahan = cleanPrayerBody(lines);
+      mappedData.doaAtasPersembahan = cleanPrayerBody(lines, sec.title);
       mappedSectionIds.add(sec.id);
       continue;
     }
@@ -834,7 +870,7 @@ export function selectRelevantSections(
       !mappedData.doaSesudahKomuni
     ) {
       const lines = sec.body?.filter((b) => b !== sec.title) || [];
-      mappedData.doaSesudahKomuni = cleanPrayerBody(lines);
+      mappedData.doaSesudahKomuni = cleanPrayerBody(lines, sec.title);
       mappedSectionIds.add(sec.id);
       continue;
     }
