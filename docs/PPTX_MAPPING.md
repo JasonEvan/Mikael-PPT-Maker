@@ -240,6 +240,15 @@ item in `mappedData.doaUmat.intentions`:
   > "prompt" line and the congregation's reply always appear together.
 - If there are zero intentions, both placeholders on the matched slide
   are cleared to empty strings (slide stays in the deck, blank).
+#### 9. Doa Umat Intentions
+- **Anchor**: Slide text containing `"DOA UMAT"` and containing $\ge 2$ placeholders (`(teks)`).
+- **Parser Logic (`parseDoaUmatData` & `cleanIntentionBodyLines`)**:
+  - Accumulates multi-paragraph intention blocks (`L. Bagi...`, `Ya Bapa...`, `Marilah kita mohon …`, `U. ...`) into single structured items `{ title, body, response }`.
+  - Continuation lines (including `Marilah kita mohon …`) are grouped into the intention's `body` rather than being treated as independent intentions.
+  - Deduplicates adjacent identical formula prompt lines.
+- **Overflow Handling**:
+  - If intention body exceeds 220 chars or combined body + response exceeds 220 chars, splits cleanly across slides at sentence boundaries (`[.!?]`).
+  - Slide 1 contains Title + Body Chunk 1; Slide 2+ contains remaining body chunk / last sentence + yellow italic response `U. [Response]`.r text, and appends `U. Amin` on the final chunk.
 
 **10. Outro** — next slide reached after intentions are handled. Fills
 `mappedData.doaUmat.closing`, 260-char limit, overflow-aware, no strip

@@ -248,6 +248,23 @@ function isKnownLiturgySectionHeader(title: string): boolean {
   );
 }
 
+// ponytail: helper to clean intention body lines and deduplicate adjacent identical formula lines
+function cleanIntentionBodyLines(lines: string[]): string {
+  const deduped: string[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (
+      deduped.length > 0 &&
+      deduped[deduped.length - 1].toLowerCase() === trimmed.toLowerCase()
+    ) {
+      continue;
+    }
+    deduped.push(trimmed);
+  }
+  return deduped.join("\n").trim();
+}
+
 // ponytail: helper to parse Doa Umat intro, intentions, and true priest conclusion outro
 function parseDoaUmatData(section: ParsedLiturgySection): MappedDoaUmat {
   const validParagraphs = section.paragraphs.filter((p) => {
@@ -274,6 +291,11 @@ function parseDoaUmatData(section: ParsedLiturgySection): MappedDoaUmat {
   const intentions: { title: string; body: string; response?: string }[] = [];
   const outroLines: string[] = [];
   let foundUjub = false;
+  let currentIntention: {
+    title: string;
+    bodyLines: string[];
+    response?: string;
+  } | null = null;
 
   for (const p of validParagraphs) {
     if (p === introP) continue;
@@ -285,6 +307,14 @@ function parseDoaUmatData(section: ParsedLiturgySection): MappedDoaUmat {
     // Check if Doa Ujub / Pribadi marker reached
     if (isDoaUjubMarker(text)) {
       foundUjub = true;
+      if (currentIntention) {
+        intentions.push({
+          title: currentIntention.title,
+          body: cleanIntentionBodyLines(currentIntention.bodyLines),
+          response: currentIntention.response || "",
+        });
+        currentIntention = null;
+      }
       continue;
     }
 
@@ -294,7 +324,6 @@ function parseDoaUmatData(section: ParsedLiturgySection): MappedDoaUmat {
 
       if (isPriestLine) {
         const cleanOutro = stripSpeakerPrefix(text);
-        // Exclude formula prompt lines like "Kami mohon..."
         if (cleanOutro && !/^kami\s+mohon/i.test(cleanOutro)) {
           outroLines.push(cleanOutro);
           break; // Captured the priest conclusion prayer!
@@ -303,10 +332,18 @@ function parseDoaUmatData(section: ParsedLiturgySection): MappedDoaUmat {
       continue;
     }
 
-    // Skip congregation response lines (matching U / Umat speaker prefix)
+    // Check congregation response lines (matching U / Umat speaker prefix)
     if (isCongregationResponse(text)) {
       const cleanResponse = stripSpeakerPrefix(text);
-      if (intentions.length > 0) {
+      if (currentIntention) {
+        currentIntention.response = cleanResponse;
+        intentions.push({
+          title: currentIntention.title,
+          body: cleanIntentionBodyLines(currentIntention.bodyLines),
+          response: currentIntention.response,
+        });
+        currentIntention = null;
+      } else if (intentions.length > 0) {
         intentions[intentions.length - 1].response = cleanResponse;
       }
       continue;
@@ -315,16 +352,68 @@ function parseDoaUmatData(section: ParsedLiturgySection): MappedDoaUmat {
     const cleanText = stripSpeakerPrefix(text);
     if (!cleanText) continue;
 
-    const firstDotIdx = cleanText.indexOf(".");
-    if (firstDotIdx > 0) {
-      intentions.push({
-        title: cleanText.slice(0, firstDotIdx + 1).trim(),
-        body: cleanText.slice(firstDotIdx + 1).trim(),
-        response: "",
-      });
+    // Check if line starts a NEW intention item (starts with speaker prefix "L.", "Bagi", or contains short title ending with dot)
+    const isLektorPrefix =
+      /^[L][.:\s\t]/i.test(text) || /^Lektor[.:\s\t]/i.test(text);
+    const startsWithBagi = /^Bagi\s+/i.test(cleanText);
+
+    if (isLektorPrefix || startsWithBagi) {
+      if (currentIntention) {
+        intentions.push({
+          title: currentIntention.title,
+          body: cleanIntentionBodyLines(currentIntention.bodyLines),
+          response: currentIntention.response || "",
+        });
+        currentIntention = null;
+      }
+
+      const firstDotIdx = cleanText.indexOf(".");
+      if (firstDotIdx > 0 && firstDotIdx <= 150) {
+        const title = cleanText.slice(0, firstDotIdx + 1).trim();
+        const rest = cleanText.slice(firstDotIdx + 1).trim();
+        currentIntention = {
+          title,
+          bodyLines: rest ? [rest] : [],
+          response: "",
+        };
+      } else {
+        currentIntention = {
+          title: cleanText,
+          bodyLines: [],
+          response: "",
+        };
+      }
     } else {
-      intentions.push({ title: cleanText, body: cleanText, response: "" });
+      // Continuation line of current intention (e.g. prayer body or "Marilah kita mohon …")
+      if (currentIntention) {
+        currentIntention.bodyLines.push(cleanText);
+      } else {
+        const firstDotIdx = cleanText.indexOf(".");
+        if (firstDotIdx > 0 && firstDotIdx <= 150) {
+          const title = cleanText.slice(0, firstDotIdx + 1).trim();
+          const rest = cleanText.slice(firstDotIdx + 1).trim();
+          currentIntention = {
+            title,
+            bodyLines: rest ? [rest] : [],
+            response: "",
+          };
+        } else {
+          currentIntention = {
+            title: cleanText,
+            bodyLines: [],
+            response: "",
+          };
+        }
+      }
     }
+  }
+
+  if (currentIntention) {
+    intentions.push({
+      title: currentIntention.title,
+      body: cleanIntentionBodyLines(currentIntention.bodyLines),
+      response: currentIntention.response || "",
+    });
   }
 
   return {
