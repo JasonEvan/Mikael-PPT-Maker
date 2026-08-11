@@ -940,6 +940,7 @@ export async function generatePPTXBuffer(
         for (let i = 1; i < persembahanChunks.length; i++) {
           const isLast = i === persembahanChunks.length - 1;
           let dupSlideXml = originalSlideXml;
+          dupSlideXml = stripIntroParagraphs(dupSlideXml);
 
           if (!isLast) {
             dupSlideXml = stripClosingParagraphs(dupSlideXml);

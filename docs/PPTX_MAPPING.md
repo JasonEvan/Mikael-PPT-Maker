@@ -245,12 +245,11 @@ item in `mappedData.doaUmat.intentions`:
 `mappedData.doaUmat.closing`, 260-char limit, overflow-aware, no strip
 logic (same reasoning as intro).
 
-### 11. Doa Atas Persembahan
-
-- **Anchor**: slide text contains `"DOA ATAS PERSEMBAHAN"` or `"ATAS PERSEMBAHAN"`.
-- **Limit**: 240 chars. Same strip-on-overflow pattern as Doa Kolekta
-  (intro stripped on continuation slides, closing stripped on all but
-  the last).
+#### 11. Doa Atas Persembahan
+- **Anchor**: Slide text containing `"DOA ATAS PERSEMBAHAN"` or `"ATAS PERSEMBAHAN"`.
+- **Overflow Handling**:
+  - **Slide 1**: Retains the top title header (`† DOA ATAS PERSEMBAHAN`), contains chunk 1 of prayer text, and strips closing response (`U. Amin`) if text spans multiple slides.
+  - **Slide 2+**: Strips top title header (`stripIntroParagraphs`), starts cleanly with overflowed prayer text, and appends `U. Amin` on the final chunk.
 
 ### 12. Doa Sesudah Komuni
 
