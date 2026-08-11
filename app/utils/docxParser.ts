@@ -355,12 +355,8 @@ function cleanReadingNotesBody(lines: string[], epigraph?: string): string {
     // Filter out Gospel dialogue greetings
     if (isGospelDialogueLine(trimmed)) return false;
 
-    // Filter out epigraph matching lines
-    if (
-      normEpigraph &&
-      (trimmed.toLowerCase().includes(normEpigraph) ||
-        normEpigraph.includes(trimmed.toLowerCase()))
-    ) {
+    // Filter out standalone epigraph lines (exact string match regardless of length)
+    if (normEpigraph && trimmed.toLowerCase() === normEpigraph) {
       return false;
     }
 
