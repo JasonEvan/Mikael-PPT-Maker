@@ -339,10 +339,15 @@ function splitLastSentence(bodyText: string): {
   return { mainBody: trimmed, lastSentence: "" };
 }
 
+export interface PptxGeneratorOptions {
+  doaKolektaMaxChars?: number;
+}
+
 // ponytail: generate filled PPTX from template and MappedLiturgyData
 export async function generatePPTXBufferForTemplate(
   mappedData: MappedLiturgyData,
   templateFileName: string,
+  options: PptxGeneratorOptions = {},
 ): Promise<Buffer> {
   const templatePath = path.join(
     process.cwd(),
@@ -608,7 +613,7 @@ export async function generatePPTXBufferForTemplate(
       const originalSlideXml = slideXml;
       const kolektaChunks = splitTextIntoSlideChunks(
         mappedData.doaKolekta || "",
-        260,
+        options.doaKolektaMaxChars ?? 260,
       );
 
       if (kolektaChunks.length === 1) {

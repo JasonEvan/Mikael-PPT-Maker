@@ -1,7 +1,7 @@
 import { MappedLiturgyData } from "../utils/docxParser";
 import { generatePPTXBufferForTemplate } from "./pptxGenerator";
 
-// OBS-specific generator. It deliberately shares the established replacement,
+// OBS Hijau-specific generator. It deliberately shares the established replacement,
 // slide-overflow, and notes logic with the weekly generator.
 export function generatePPTXOBSBuffer(
   mappedData: MappedLiturgyData,
@@ -9,5 +9,6 @@ export function generatePPTXOBSBuffer(
   return generatePPTXBufferForTemplate(
     mappedData,
     "Template_PPT_OBS_Hijau.pptx",
+    { doaKolektaMaxChars: 200 },
   );
 }
