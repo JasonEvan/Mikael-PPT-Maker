@@ -340,17 +340,17 @@ function splitLastSentence(bodyText: string): {
 }
 
 // ponytail: generate filled PPTX from template and MappedLiturgyData
-export async function generatePPTXBuffer(
+export async function generatePPTXBufferForTemplate(
   mappedData: MappedLiturgyData,
+  templateFileName: string,
 ): Promise<Buffer> {
   const templatePath = path.join(
     process.cwd(),
-    "app/template/Template_Mingguan.pptx",
+    "app/template",
+    templateFileName,
   );
   if (!fs.existsSync(templatePath)) {
-    throw new Error(
-      "Template PowerPoint (Template_Mingguan.pptx) tidak ditemukan.",
-    );
+    throw new Error(`Template PowerPoint (${templateFileName}) tidak ditemukan.`);
   }
 
   const templateBuffer = await fs.promises.readFile(templatePath);
@@ -486,6 +486,33 @@ export async function generatePPTXBuffer(
     return { newSlideNum, newFileName, newRId };
   };
 
+  // Resolve a slide's notes through its own relationship so each template can
+  // use its natural notes-slide numbering.
+  const updateSlideNotes = async (slideFileName: string, notesText: string) => {
+    if (!notesText) return;
+
+    const slideNum = slideFileName.match(/slide(\d+)\.xml$/)?.[1];
+    if (!slideNum) return;
+
+    const relsFile = zip.file(`ppt/slides/_rels/slide${slideNum}.xml.rels`);
+    if (!relsFile) return;
+
+    const relsXml = await relsFile.async("text");
+    const target = relsXml.match(
+      /<Relationship [^>]*Type="http:\/\/schemas\.openxmlformats\.org\/officeDocument\/2006\/relationships\/notesSlide"[^>]*Target="([^\"]+)"/i,
+    )?.[1];
+    if (!target) return;
+
+    const notesFileName = path.posix.normalize(
+      path.posix.join("ppt/slides", target),
+    );
+    const notesFile = zip.file(notesFileName);
+    if (!notesFile) return;
+
+    const notesXml = await notesFile.async("text");
+    zip.file(notesFileName, updateNotesSlideXml(notesXml, notesText));
+  };
+
   // Tracking section states dynamically across content slides
   let seruanCount = 0;
   let hasHandledMazmur = false;
@@ -617,7 +644,7 @@ export async function generatePPTXBuffer(
       }
     }
 
-    // 3. Bacaan Pertama Content Slide (+ notesSlide2.xml)
+    // 3. Bacaan Pertama Content Slide
     else if (
       slideTextUpper.includes("BACAAN PERTAMA") ||
       slideTextUpper.includes("BACAAN I ")
@@ -627,17 +654,7 @@ export async function generatePPTXBuffer(
       slideXml = replacePlaceholdersInXml(slideXml, [epigraph, citation]);
       zip.file(slide.fileName, slideXml);
 
-      if (mappedData.bacaanPertama?.notesBody) {
-        const notesFile = zip.file("ppt/notesSlides/notesSlide2.xml");
-        if (notesFile) {
-          const notesXml = await notesFile.async("text");
-          const updatedNotes = updateNotesSlideXml(
-            notesXml,
-            mappedData.bacaanPertama.notesBody,
-          );
-          zip.file("ppt/notesSlides/notesSlide2.xml", updatedNotes);
-        }
-      }
+      await updateSlideNotes(slide.fileName, mappedData.bacaanPertama?.notesBody || "");
     }
 
     // 4. Mazmur Tanggapan Content Slide (duplication for all verses sequentially)
@@ -678,7 +695,7 @@ export async function generatePPTXBuffer(
       hasHandledMazmur = true;
     }
 
-    // 5. Bacaan Kedua Content Slide (+ notesSlide3.xml)
+    // 5. Bacaan Kedua Content Slide
     else if (
       slideTextUpper.includes("BACAAN KEDUA") ||
       slideTextUpper.includes("BACAAN II ")
@@ -688,17 +705,7 @@ export async function generatePPTXBuffer(
       slideXml = replacePlaceholdersInXml(slideXml, [epigraph, citation]);
       zip.file(slide.fileName, slideXml);
 
-      if (mappedData.bacaanKedua?.notesBody) {
-        const notesFile = zip.file("ppt/notesSlides/notesSlide3.xml");
-        if (notesFile) {
-          const notesXml = await notesFile.async("text");
-          const updatedNotes = updateNotesSlideXml(
-            notesXml,
-            mappedData.bacaanKedua.notesBody,
-          );
-          zip.file("ppt/notesSlides/notesSlide3.xml", updatedNotes);
-        }
-      }
+      await updateSlideNotes(slide.fileName, mappedData.bacaanKedua?.notesBody || "");
     }
 
     // 6. Bacaan Injil - Gospel Citation Intro Slide
@@ -708,7 +715,7 @@ export async function generatePPTXBuffer(
       zip.file(slide.fileName, slideXml);
     }
 
-    // 7. Bacaan Injil - Content Slide (+ notesSlide6.xml)
+    // 7. Bacaan Injil - Content Slide
     else if (
       slideTextUpper.includes("INJIL") &&
       !slideTextUpper.includes("PENGANTAR")
@@ -718,17 +725,7 @@ export async function generatePPTXBuffer(
       slideXml = replacePlaceholdersInXml(slideXml, [epigraph, citation]);
       zip.file(slide.fileName, slideXml);
 
-      if (mappedData.bacaanInjil?.notesBody) {
-        const notesFile = zip.file("ppt/notesSlides/notesSlide6.xml");
-        if (notesFile) {
-          const notesXml = await notesFile.async("text");
-          const updatedNotes = updateNotesSlideXml(
-            notesXml,
-            mappedData.bacaanInjil.notesBody,
-          );
-          zip.file("ppt/notesSlides/notesSlide6.xml", updatedNotes);
-        }
-      }
+      await updateSlideNotes(slide.fileName, mappedData.bacaanInjil?.notesBody || "");
     }
 
     // 8. Doa Umat Intro Slide (Slide 63: right after DOA UMAT title slide with 1 placeholder, supporting overflow splitting)
@@ -1019,4 +1016,11 @@ export async function generatePPTXBuffer(
   });
 
   return pptxBuffer;
+}
+
+// Default generator retained for the original weekly template.
+export function generatePPTXBuffer(
+  mappedData: MappedLiturgyData,
+): Promise<Buffer> {
+  return generatePPTXBufferForTemplate(mappedData, "Template_Mingguan.pptx");
 }

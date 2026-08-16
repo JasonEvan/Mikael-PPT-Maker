@@ -12,6 +12,13 @@ interface DocxViewerProps {
   onReset?: () => void;
 }
 
+type TemplateId = "mingguan" | "obs";
+
+const templateDownloadName: Record<TemplateId, string> = {
+  mingguan: "Mingguan",
+  obs: "OBS_Hijau",
+};
+
 // ponytail: modern segmented tab bar with search and PPTX download generator
 export default function DocxViewer({ parseResult, onReset }: DocxViewerProps) {
   const [activeTab, setActiveTab] = useState<"mapped" | "sections" | "raw">(
@@ -20,6 +27,7 @@ export default function DocxViewer({ parseResult, onReset }: DocxViewerProps) {
   const [searchTerm, setSearchTerm] = useState<string>("");
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [selectedTemplate, setSelectedTemplate] = useState<TemplateId>("obs");
 
   const mappedData: MappedLiturgyData = selectRelevantSections(parseResult);
 
@@ -57,7 +65,7 @@ export default function DocxViewer({ parseResult, onReset }: DocxViewerProps) {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ mappedData }),
+        body: JSON.stringify({ mappedData, template: selectedTemplate }),
       });
 
       if (!response.ok) {
@@ -69,7 +77,7 @@ export default function DocxViewer({ parseResult, onReset }: DocxViewerProps) {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `Slide_Liturgi_${parseResult.fileName.replace(/\.docx$/i, "")}.pptx`;
+      a.download = `Slide_Liturgi_${parseResult.fileName.replace(/\.docx$/i, "")}_${templateDownloadName[selectedTemplate]}.pptx`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -115,7 +123,7 @@ export default function DocxViewer({ parseResult, onReset }: DocxViewerProps) {
           </p>
         </div>
 
-        <div className="d-flex align-items-center gap-2">
+        <div className="d-flex flex-wrap align-items-center gap-2">
           {onReset && (
             <button
               type="button"
@@ -125,6 +133,23 @@ export default function DocxViewer({ parseResult, onReset }: DocxViewerProps) {
               Ganti Berkas
             </button>
           )}
+
+          <label className="visually-hidden" htmlFor="pptx-template">
+            Pilih template PowerPoint
+          </label>
+          <select
+            id="pptx-template"
+            value={selectedTemplate}
+            onChange={(event) =>
+              setSelectedTemplate(event.target.value as TemplateId)
+            }
+            disabled={isGenerating}
+            className="form-select form-select-sm bg-dark text-white border-secondary-subtle rounded-pill px-3"
+            style={{ width: "auto" }}
+          >
+            <option value="obs">Template OBS Hijau</option>
+            <option value="mingguan">Template Mingguan</option>
+          </select>
 
           <button
             type="button"
