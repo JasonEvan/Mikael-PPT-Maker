@@ -12,6 +12,7 @@ export function generatePPTXOBSBuffer(
     {
       doaKolektaMaxChars: 200,
       usesPlaceholderOnlyInjilContentSlide: true,
+      usesSinglePlaceholderDoaUmatIntentions: true,
     },
   );
 }

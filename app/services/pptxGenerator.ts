@@ -110,6 +110,53 @@ function replacePlaceholdersInXml(
   });
 }
 
+// OBS Hijau's Doa Umat prayer slide has one bold placeholder. Retain that
+// styling only for the first sentence (or title line), then explicitly make
+// the remaining prayer text unbold.
+function replaceDoaUmatSinglePlaceholderInXml(
+  slideXml: string,
+  replacement: string,
+): string {
+  return slideXml.replace(/<a:p>[\s\S]*?<\/a:p>/g, (pBlock) => {
+    const tMatches = pBlock.match(/<a:t[^>]*>(.*?)<\/a:t>/g) || [];
+    const fullText = tMatches.map((t) => t.replace(/<[^>]+>/g, "")).join("");
+    if (!/\(\s*teks\s*\)/i.test(fullText)) return pBlock;
+
+    const pPrXml = pBlock.match(/<a:pPr\b[\s\S]*?<\/a:pPr>/i)?.[0] || "";
+    const baseRPrXml =
+      pBlock.match(/<a:rPr\b[^>]*\/>|<a:rPr\b[\s\S]*?<\/a:rPr>/i)?.[0] ||
+      '<a:rPr lang="en-US" sz="4800"/>';
+    const setBold = (rPrXml: string, bold: boolean) =>
+      /\bb="(?:1|0|true|false)"/i.test(rPrXml)
+        ? rPrXml.replace(/\bb="(?:1|0|true|false)"/i, `b="${bold ? 1 : 0}"`)
+        : rPrXml.replace(/<a:rPr\b/i, `<a:rPr b="${bold ? 1 : 0}"`);
+
+    const lineBreakIndex = replacement.indexOf("\n");
+    const sentenceMatch = replacement.match(/[.!?…](?=\s|$)/);
+    const sentenceEndIndex = sentenceMatch
+      ? sentenceMatch.index! + sentenceMatch[0].length
+      : -1;
+    const splitAt =
+      sentenceEndIndex >= 0 &&
+      (lineBreakIndex < 0 || sentenceEndIndex <= lineBreakIndex)
+        ? sentenceEndIndex
+        : lineBreakIndex >= 0
+          ? lineBreakIndex
+          : replacement.length;
+    const hasLineBreak = splitAt === lineBreakIndex;
+    const firstText = replacement.slice(0, splitAt).trimEnd();
+    const remainingText = replacement
+      .slice(hasLineBreak ? splitAt + 1 : splitAt)
+      .trimStart();
+    const firstRun = `<a:r>${setBold(baseRPrXml, true)}<a:t>${escapeXml(firstText)}</a:t></a:r>`;
+    const remainingRun = remainingText
+      ? `${hasLineBreak ? "<a:br/>" : ""}<a:r>${setBold(baseRPrXml, false)}<a:t>${escapeXml(remainingText)}</a:t></a:r>`
+      : "";
+
+    return `<a:p>${pPrXml}${firstRun}${remainingRun}</a:p>`;
+  });
+}
+
 // ponytail: helper to fill Doa Umat intention slide (Placeholder 1 = Bold Title + Unbold Body separated by \n, Placeholder 2 = Yellow Italic Response)
 function replaceDoaUmatIntentionInXml(
   slideXml: string,
@@ -342,6 +389,7 @@ function splitLastSentence(bodyText: string): {
 export interface PptxGeneratorOptions {
   doaKolektaMaxChars?: number;
   usesPlaceholderOnlyInjilContentSlide?: boolean;
+  usesSinglePlaceholderDoaUmatIntentions?: boolean;
 }
 
 // ponytail: generate filled PPTX from template and MappedLiturgyData
@@ -788,7 +836,38 @@ export async function generatePPTXBufferForTemplate(
       !hasHandledDoaUmatIntentions
     ) {
       const count = getPlaceholderCount(slideXml);
-      if (count >= 2) {
+      if (options.usesSinglePlaceholderDoaUmatIntentions && count === 1) {
+        const originalSlideXml = slideXml;
+        const intentions = mappedData.doaUmat?.intentions || [];
+        const intentionChunks = intentions.flatMap((item) => {
+          const intentionText = [item.title, item.body]
+            .filter(Boolean)
+            .join("\n");
+          return splitTextIntoSlideChunks(intentionText, 260);
+        });
+
+        const firstSlideXml = replaceDoaUmatSinglePlaceholderInXml(
+          originalSlideXml,
+          intentionChunks[0] || "",
+        );
+        zip.file(slide.fileName, firstSlideXml);
+
+        let lastRId = slide.rId;
+        for (let i = 1; i < intentionChunks.length; i++) {
+          const filledIntentionXml = replaceDoaUmatSinglePlaceholderInXml(
+            originalSlideXml,
+            intentionChunks[i],
+          );
+          const { newRId } = await duplicateSlide(
+            slide.fileName,
+            lastRId,
+            filledIntentionXml,
+          );
+          lastRId = newRId;
+        }
+
+        hasHandledDoaUmatIntentions = true;
+      } else if (count >= 2) {
         const originalSlideXml = slideXml;
         const intentions = mappedData.doaUmat?.intentions || [];
 
