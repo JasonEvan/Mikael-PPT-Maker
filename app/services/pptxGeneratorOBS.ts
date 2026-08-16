@@ -9,6 +9,9 @@ export function generatePPTXOBSBuffer(
   return generatePPTXBufferForTemplate(
     mappedData,
     "Template_PPT_OBS_Hijau.pptx",
-    { doaKolektaMaxChars: 200 },
+    {
+      doaKolektaMaxChars: 200,
+      usesPlaceholderOnlyInjilContentSlide: true,
+    },
   );
 }

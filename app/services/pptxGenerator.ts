@@ -341,6 +341,7 @@ function splitLastSentence(bodyText: string): {
 
 export interface PptxGeneratorOptions {
   doaKolektaMaxChars?: number;
+  usesPlaceholderOnlyInjilContentSlide?: boolean;
 }
 
 // ponytail: generate filled PPTX from template and MappedLiturgyData
@@ -523,6 +524,7 @@ export async function generatePPTXBufferForTemplate(
   let hasHandledMazmur = false;
   let hasPassedBacaanPertama = false;
   let hasPassedBacaanKedua = false;
+  let hasPendingInjilContent = false;
   let hasPassedDoaUmatTitle = false;
   let hasHandledDoaUmatIntro = false;
   let hasHandledDoaUmatIntentions = false;
@@ -580,6 +582,15 @@ export async function generatePPTXBufferForTemplate(
         slideTextUpper.includes("BACAAN II "))
     ) {
       hasPassedBacaanKedua = true;
+    }
+
+    // In OBS Hijau, the content slide after this citation contains only the
+    // two placeholders, so it cannot be identified from its own slide text.
+    if (
+      options.usesPlaceholderOnlyInjilContentSlide &&
+      slideTextUpper.includes("INILAH INJIL SUCI MENURUT")
+    ) {
+      hasPendingInjilContent = true;
     }
 
     // Only process content slides that actually contain a (teks) placeholder
@@ -720,10 +731,13 @@ export async function generatePPTXBufferForTemplate(
       zip.file(slide.fileName, slideXml);
     }
 
-    // 7. Bacaan Injil - Content Slide
+    // 7. Bacaan Injil - Content Slide. The first placeholder is the
+    // epigraph; the second is the source/citation extracted from the DOCX.
     else if (
-      slideTextUpper.includes("INJIL") &&
-      !slideTextUpper.includes("PENGANTAR")
+      (options.usesPlaceholderOnlyInjilContentSlide &&
+        hasPendingInjilContent) ||
+      (slideTextUpper.includes("INJIL") &&
+        !slideTextUpper.includes("PENGANTAR"))
     ) {
       const epigraph = formatEpigraph(mappedData.bacaanInjil?.epigraph);
       const citation = cleanCitation(mappedData.bacaanInjil?.citation);
@@ -731,6 +745,7 @@ export async function generatePPTXBufferForTemplate(
       zip.file(slide.fileName, slideXml);
 
       await updateSlideNotes(slide.fileName, mappedData.bacaanInjil?.notesBody || "");
+      hasPendingInjilContent = false;
     }
 
     // 8. Doa Umat Intro Slide (Slide 63: right after DOA UMAT title slide with 1 placeholder, supporting overflow splitting)
