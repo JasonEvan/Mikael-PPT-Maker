@@ -11,6 +11,7 @@ export function generatePPTXOBSBuffer(
     "Template_PPT_OBS_Hijau.pptx",
     {
       doaKolektaMaxChars: 200,
+      doaUmatIntentionMaxChars: 210,
       usesPlaceholderOnlyInjilContentSlide: true,
       usesSinglePlaceholderDoaUmatIntentions: true,
     },

@@ -116,6 +116,7 @@ function replacePlaceholdersInXml(
 function replaceDoaUmatSinglePlaceholderInXml(
   slideXml: string,
   replacement: string,
+  boldFirstSentence: boolean,
 ): string {
   return slideXml.replace(/<a:p>[\s\S]*?<\/a:p>/g, (pBlock) => {
     const tMatches = pBlock.match(/<a:t[^>]*>(.*?)<\/a:t>/g) || [];
@@ -148,7 +149,7 @@ function replaceDoaUmatSinglePlaceholderInXml(
     const remainingText = replacement
       .slice(hasLineBreak ? splitAt + 1 : splitAt)
       .trimStart();
-    const firstRun = `<a:r>${setBold(baseRPrXml, true)}<a:t>${escapeXml(firstText)}</a:t></a:r>`;
+    const firstRun = `<a:r>${setBold(baseRPrXml, boldFirstSentence)}<a:t>${escapeXml(firstText)}</a:t></a:r>`;
     const remainingRun = remainingText
       ? `${hasLineBreak ? "<a:br/>" : ""}<a:r>${setBold(baseRPrXml, false)}<a:t>${escapeXml(remainingText)}</a:t></a:r>`
       : "";
@@ -388,6 +389,7 @@ function splitLastSentence(bodyText: string): {
 
 export interface PptxGeneratorOptions {
   doaKolektaMaxChars?: number;
+  doaUmatIntentionMaxChars?: number;
   usesPlaceholderOnlyInjilContentSlide?: boolean;
   usesSinglePlaceholderDoaUmatIntentions?: boolean;
 }
@@ -840,15 +842,25 @@ export async function generatePPTXBufferForTemplate(
         const originalSlideXml = slideXml;
         const intentions = mappedData.doaUmat?.intentions || [];
         const intentionChunks = intentions.flatMap((item) => {
-          const intentionText = [item.title, item.body]
-            .filter(Boolean)
-            .join("\n");
-          return splitTextIntoSlideChunks(intentionText, 260);
+          const intentionText = [item.title, item.body].filter(Boolean).join("\n");
+          const chunks = splitTextIntoSlideChunks(
+            intentionText,
+            options.doaUmatIntentionMaxChars ?? 260,
+          );
+
+          return chunks.map((chunk, index) => ({
+            text:
+              index === chunks.length - 1 && item.response
+                ? `${chunk}\nU\t${item.response}`
+                : chunk,
+            boldFirstSentence: index === 0,
+          }));
         });
 
         const firstSlideXml = replaceDoaUmatSinglePlaceholderInXml(
           originalSlideXml,
-          intentionChunks[0] || "",
+          intentionChunks[0]?.text || "",
+          intentionChunks[0]?.boldFirstSentence || false,
         );
         zip.file(slide.fileName, firstSlideXml);
 
@@ -856,7 +868,8 @@ export async function generatePPTXBufferForTemplate(
         for (let i = 1; i < intentionChunks.length; i++) {
           const filledIntentionXml = replaceDoaUmatSinglePlaceholderInXml(
             originalSlideXml,
-            intentionChunks[i],
+            intentionChunks[i].text,
+            intentionChunks[i].boldFirstSentence,
           );
           const { newRId } = await duplicateSlide(
             slide.fileName,
