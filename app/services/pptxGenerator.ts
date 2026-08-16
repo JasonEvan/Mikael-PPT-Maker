@@ -390,6 +390,7 @@ function splitLastSentence(bodyText: string): {
 export interface PptxGeneratorOptions {
   doaKolektaMaxChars?: number;
   doaUmatIntentionMaxChars?: number;
+  doaSesudahKomuniMaxChars?: number;
   usesPlaceholderOnlyInjilContentSlide?: boolean;
   usesSinglePlaceholderDoaUmatIntentions?: boolean;
 }
@@ -1085,7 +1086,7 @@ export async function generatePPTXBufferForTemplate(
       const originalSlideXml = slideXml;
       const komuniChunks = splitTextIntoSlideChunks(
         mappedData.doaSesudahKomuni || "",
-        280,
+        options.doaSesudahKomuniMaxChars ?? 280,
       );
 
       if (komuniChunks.length === 1) {
