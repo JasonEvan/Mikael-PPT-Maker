@@ -12,11 +12,12 @@ interface DocxViewerProps {
   onReset?: () => void;
 }
 
-type TemplateId = "mingguan" | "obs";
+type TemplateId = "mingguan" | "obs" | "obs-kuning";
 
 const templateDownloadName: Record<TemplateId, string> = {
   mingguan: "Mingguan",
   obs: "OBS_Hijau",
+  "obs-kuning": "OBS_Kuning",
 };
 
 // ponytail: modern segmented tab bar with search and PPTX download generator
@@ -148,6 +149,7 @@ export default function DocxViewer({ parseResult, onReset }: DocxViewerProps) {
             style={{ width: "auto" }}
           >
             <option value="obs">Template OBS Hijau</option>
+            <option value="obs-kuning">Template OBS Kuning</option>
             <option value="mingguan">Template Mingguan</option>
           </select>
 

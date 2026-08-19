@@ -6,9 +6,29 @@ import { generatePPTXBufferForTemplate } from "./pptxGenerator";
 export function generatePPTXOBSBuffer(
   mappedData: MappedLiturgyData,
 ): Promise<Buffer> {
-  return generatePPTXBufferForTemplate(
+  return generatePPTXOBSBufferForTemplate(
     mappedData,
     "Template_PPT_OBS_Hijau.pptx",
+  );
+}
+
+// OBS Kuning uses the same slide structure and replacement rules as OBS Hijau.
+export function generatePPTXOBSKuningBuffer(
+  mappedData: MappedLiturgyData,
+): Promise<Buffer> {
+  return generatePPTXOBSBufferForTemplate(
+    mappedData,
+    "Template_PPT_OBS_Kuning.pptx",
+  );
+}
+
+function generatePPTXOBSBufferForTemplate(
+  mappedData: MappedLiturgyData,
+  templateFileName: string,
+): Promise<Buffer> {
+  return generatePPTXBufferForTemplate(
+    mappedData,
+    templateFileName,
     {
       doaKolektaMaxChars: 200,
       doaUmatIntentionMaxChars: 210,
