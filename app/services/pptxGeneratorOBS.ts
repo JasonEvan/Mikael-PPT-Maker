@@ -15,6 +15,7 @@ export function generatePPTXOBSBuffer(
       doaSesudahKomuniMaxChars: 210,
       usesPlaceholderOnlyInjilContentSlide: true,
       usesSinglePlaceholderDoaUmatIntentions: true,
+      usesPlaceholderOnlySeruanTobatSlides: true,
     },
   );
 }

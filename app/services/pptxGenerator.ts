@@ -393,6 +393,7 @@ export interface PptxGeneratorOptions {
   doaSesudahKomuniMaxChars?: number;
   usesPlaceholderOnlyInjilContentSlide?: boolean;
   usesSinglePlaceholderDoaUmatIntentions?: boolean;
+  usesPlaceholderOnlySeruanTobatSlides?: boolean;
 }
 
 // ponytail: generate filled PPTX from template and MappedLiturgyData
@@ -572,6 +573,7 @@ export async function generatePPTXBufferForTemplate(
 
   // Tracking section states dynamically across content slides
   let seruanCount = 0;
+  let hasPassedSeruanTobatTitle = false;
   let hasHandledMazmur = false;
   let hasPassedBacaanPertama = false;
   let hasPassedBacaanKedua = false;
@@ -607,6 +609,15 @@ export async function generatePPTXBufferForTemplate(
       !slideTextUpper.includes("AMIN")
     ) {
       hasPassedDoaUmatTitle = true;
+    }
+
+    // OBS Hijau places each Seruan Tobat invocation on a placeholder-only
+    // slide, followed by a separate, fixed congregation-response slide.
+    if (
+      options.usesPlaceholderOnlySeruanTobatSlides &&
+      slideTextUpper.includes("SERUAN TOBAT")
+    ) {
+      hasPassedSeruanTobatTitle = true;
     }
 
     // Check if slide is Doa Sesudah Komuni Title slide (Slide 91: DOA SESUDAH KOMUNI)
@@ -656,8 +667,19 @@ export async function generatePPTXBufferForTemplate(
       continue;
     }
 
-    // 1. Seruan Tobat Content Slides
-    if (slideTextUpper.includes("KASIHANILAH KAMI")) {
+    // 1. OBS Hijau Seruan Tobat invocation slides. Their placeholders have no
+    // identifying text, so fill the first three placeholders after the title.
+    if (hasPassedSeruanTobatTitle && seruanCount < 3) {
+      slideXml = replacePlaceholdersInXml(slideXml, [
+        mappedData.seruanTobat?.[seruanCount] || "",
+      ]);
+      zip.file(slide.fileName, slideXml);
+      seruanCount++;
+      if (seruanCount === 3) hasPassedSeruanTobatTitle = false;
+    }
+
+    // 2. Seruan Tobat Content Slides
+    else if (slideTextUpper.includes("KASIHANILAH KAMI")) {
       const idx =
         seruanCount < (mappedData.seruanTobat?.length || 0) ? seruanCount : 0;
       slideXml = replacePlaceholdersInXml(slideXml, [
@@ -667,7 +689,7 @@ export async function generatePPTXBufferForTemplate(
       seruanCount++;
     }
 
-    // 2. Doa Kolekta Content Slide
+    // 3. Doa Kolekta Content Slide
     else if (
       slideTextUpper.includes("MARILAH KITA BERDOA") &&
       !hasPassedBacaanPertama
