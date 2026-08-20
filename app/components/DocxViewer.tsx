@@ -95,7 +95,7 @@ export default function DocxViewer({ parseResult, onReset }: DocxViewerProps) {
   };
 
   return (
-    <div className="w-100 h-100 d-flex flex-column bg-panel rounded-4 p-4 text-white shadow-lg border border-secondary-subtle">
+    <div className="document-viewer w-100 h-100 d-flex flex-column rounded-4 p-4">
       {/* Header Info & Action Buttons */}
       <div className="d-flex flex-column pb-3 mb-3 border-bottom border-secondary-subtle gap-3">
         <div className="docx-viewer-file-info">

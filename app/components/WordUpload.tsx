@@ -13,9 +13,13 @@ function formatFileSize(bytes: number): string {
 
 interface WordUploadProps {
   onFileConfirmed?: (file: File) => void;
+  compact?: boolean;
 }
 
-export default function WordUpload({ onFileConfirmed }: WordUploadProps) {
+export default function WordUpload({
+  onFileConfirmed,
+  compact = false,
+}: WordUploadProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isDragActive, setIsDragActive] = useState<boolean>(false);
@@ -90,17 +94,7 @@ export default function WordUpload({ onFileConfirmed }: WordUploadProps) {
   };
 
   return (
-    <div className="w-100 max-w-lg mx-auto px-3 py-4">
-      {/* Main Title & Context */}
-      <div className="text-center mb-4">
-        <h1 className="font-serif display-6 text-white mb-2 fw-normal">
-          Otomatisasi Slide Liturgi
-        </h1>
-        <p className="text-sub small mb-0 px-2">
-          Unggah berkas Word (.docx) liturgi Misa minggu ini untuk diproses dan dicocokkan secara otomatis dengan template PowerPoint.
-        </p>
-      </div>
-
+    <div className={`word-upload ${compact ? "word-upload-compact" : ""}`}>
       {/* Hidden Native File Input */}
       <input
         ref={fileInputRef}
@@ -121,13 +115,13 @@ export default function WordUpload({ onFileConfirmed }: WordUploadProps) {
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-        className={`dropzone p-4 text-center ${isDragActive ? "drag-active" : ""}`}
+        className={`dropzone ${isDragActive ? "drag-active" : ""}`}
         aria-describedby="dropzone-instructions"
       >
         {selectedFile ? (
           /* Confirmation State */
-          <div className="py-3 px-2">
-            <div className="d-inline-flex align-items-center justify-content-center bg-white bg-opacity-10 text-white rounded-circle p-3 mb-3">
+          <div className="selected-file">
+            <div className="file-icon">
               <svg
                 width="32"
                 height="32"
@@ -143,25 +137,25 @@ export default function WordUpload({ onFileConfirmed }: WordUploadProps) {
                 />
               </svg>
             </div>
-            <h2 className="h6 text-white text-truncate mb-1 px-3" title={selectedFile.name}>
+            <h3 title={selectedFile.name}>
               {selectedFile.name}
-            </h2>
-            <p className="text-sub small mb-3">{formatFileSize(selectedFile.size)}</p>
+            </h3>
+            <p>{formatFileSize(selectedFile.size)} · Dokumen Word</p>
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
                 handleRemoveFile();
               }}
-              className="btn btn-sm btn-outline-light rounded-pill px-3 py-1 text-sub border-secondary-subtle"
+              className="quiet-button"
             >
               Ganti Berkas
             </button>
           </div>
         ) : (
           /* Resting / Dragging State */
-          <div className="py-4 px-2" id="dropzone-instructions">
-            <div className="d-inline-flex align-items-center justify-content-center text-sub rounded-circle p-3 mb-3">
+          <div className="dropzone-content" id="dropzone-instructions">
+            <div className="upload-icon">
               <svg
                 width="40"
                 height="40"
@@ -177,10 +171,10 @@ export default function WordUpload({ onFileConfirmed }: WordUploadProps) {
                 />
               </svg>
             </div>
-            <p className="text-white fw-medium mb-1">
-              Tarik & lepas berkas <span className="text-white fw-bold">.docx</span> di sini
+            <p className="dropzone-title">
+              Tarik dan lepas berkas <strong>.docx</strong>
             </p>
-            <p className="text-sub small mb-0">atau klik untuk memilih dari perangkat Anda</p>
+            <p className="dropzone-hint">atau klik untuk memilih dari perangkat</p>
           </div>
         )}
       </div>
@@ -188,26 +182,28 @@ export default function WordUpload({ onFileConfirmed }: WordUploadProps) {
       {/* Inline Validation Error Message */}
       {errorMessage && (
         <div
-          className="alert alert-danger mt-3 py-2 px-3 small border-0 bg-danger bg-opacity-10 text-danger text-center rounded-3"
+          className="form-alert"
           role="alert"
         >
           {errorMessage}
         </div>
       )}
 
-      {/* Scope Disclaimer */}
-      <p className="text-center text-muted-custom small mt-4 mb-4" style={{ fontSize: "0.82rem" }}>
-        *Catatan: Teks lagu Misa dan pengumuman gereja diproses secara terpisah dan tidak termasuk dalam otomatisasi ini.
-      </p>
+      <div className="upload-meta">
+        <span>Hanya .docx</span>
+        <span>Teks lagu & pengumuman tidak disertakan</span>
+      </div>
 
-      {/* Primary Action Button */}
       <button
         type="button"
         disabled={!selectedFile}
         onClick={handleContinue}
-        className="btn btn-wine btn-lg w-100 py-3 rounded-3 fw-semibold"
+        className="primary-button"
       >
-        Proses Berkas
+        <span>Proses berkas</span>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="m9 18 6-6-6-6" />
+        </svg>
       </button>
     </div>
   );
