@@ -91,15 +91,6 @@ export default function WordUpload({ onFileConfirmed }: WordUploadProps) {
 
   return (
     <div className="w-100 max-w-lg mx-auto px-3 py-4">
-      {/* Step Indicator */}
-      <nav aria-label="Langkah Pemrosesan" className="d-flex align-items-center justify-content-center gap-2 mb-4 small">
-        <span className="fw-bold text-white px-2 py-1 bg-white bg-opacity-10 rounded-pill">1. Unggah</span>
-        <span className="text-muted-custom">•</span>
-        <span className="text-muted-custom">2. Tinjau</span>
-        <span className="text-muted-custom">•</span>
-        <span className="text-muted-custom">3. Ekspor</span>
-      </nav>
-
       {/* Main Title & Context */}
       <div className="text-center mb-4">
         <h1 className="font-serif display-6 text-white mb-2 fw-normal">
