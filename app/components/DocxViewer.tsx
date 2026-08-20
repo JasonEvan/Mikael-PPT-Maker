@@ -97,8 +97,8 @@ export default function DocxViewer({ parseResult, onReset }: DocxViewerProps) {
   return (
     <div className="w-100 h-100 d-flex flex-column bg-panel rounded-4 p-4 text-white shadow-lg border border-secondary-subtle">
       {/* Header Info & Action Buttons */}
-      <div className="d-flex flex-column flex-sm-row align-items-sm-center justify-content-between pb-3 mb-3 border-bottom border-secondary-subtle gap-3">
-        <div>
+      <div className="d-flex flex-column pb-3 mb-3 border-bottom border-secondary-subtle gap-3">
+        <div className="docx-viewer-file-info">
           <span
             className="badge rounded-pill px-3 py-1 fw-medium mb-1"
             style={{
@@ -110,7 +110,7 @@ export default function DocxViewer({ parseResult, onReset }: DocxViewerProps) {
             Parsing & Pemetaan Berhasil
           </span>
           <h2
-            className="h5 text-white mb-0 font-serif text-truncate max-w-sm"
+            className="docx-viewer-file-name h5 text-white mb-0 font-serif"
             title={parseResult.fileName}
           >
             {parseResult.fileName}
@@ -124,7 +124,7 @@ export default function DocxViewer({ parseResult, onReset }: DocxViewerProps) {
           </p>
         </div>
 
-        <div className="d-flex flex-wrap align-items-center gap-2">
+        <div className="docx-viewer-actions d-flex flex-wrap align-items-center gap-2">
           {onReset && (
             <button
               type="button"

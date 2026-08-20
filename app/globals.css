@@ -77,4 +77,15 @@ body {
   color: var(--text-muted);
 }
 
+/* Keep lengthy uploaded filenames from pushing header actions outside the panel. */
+.docx-viewer-file-info {
+  min-width: 0;
+}
 
+.docx-viewer-file-name {
+  overflow-wrap: anywhere;
+}
+
+.docx-viewer-actions {
+  flex-shrink: 0;
+}
