@@ -78,7 +78,7 @@ export default function DocxViewer({ parseResult, onReset }: DocxViewerProps) {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `Slide_Liturgi_${parseResult.fileName.replace(/\.docx$/i, "")}_${templateDownloadName[selectedTemplate]}.pptx`;
+        a.download = `Slide_Liturgi_${parseResult.fileName.replace(/\.(?:doc|docx)$/i, "")}_${templateDownloadName[selectedTemplate]}.pptx`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);

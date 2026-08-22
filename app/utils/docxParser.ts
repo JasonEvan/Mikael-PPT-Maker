@@ -696,13 +696,37 @@ export async function parseDocxFile(file: File): Promise<DocxParseResult> {
     }
   }
 
-  // ponytail: group raw paragraphs into structured sections
-  const sections = groupIntoSections(rawParagraphs);
+  return createParseResult(file.name, rawParagraphs);
+}
 
+// Legacy .doc files are read on the server, then sent back through the same
+// section grouping used for .docx files.
+export async function parseDocFile(file: File): Promise<DocxParseResult> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await fetch("/api/parse-doc", {
+    method: "POST",
+    body: formData,
+  });
+  const data = (await response.json()) as DocxParseResult | { error?: string };
+
+  const error = "error" in data ? data.error : undefined;
+  if (!response.ok || error) {
+    throw new Error(error ?? "Gagal membaca berkas .doc.");
+  }
+
+  return data as DocxParseResult;
+}
+
+export function createParseResult(
+  fileName: string,
+  rawParagraphs: LiturgyParagraph[],
+): DocxParseResult {
   return {
-    fileName: file.name,
+    fileName,
     totalParagraphs: rawParagraphs.length,
-    sections,
+    sections: groupIntoSections(rawParagraphs),
     rawParagraphs,
   };
 }

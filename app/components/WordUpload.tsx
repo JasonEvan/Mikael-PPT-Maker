@@ -26,14 +26,19 @@ export default function WordUpload({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const validateAndSelectFile = (file: File) => {
-    // Validate file extension (.docx) and MIME type
-    const isDocxExtension = file.name.toLowerCase().endsWith(".docx");
-    const validMimeType =
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-    const isDocxMime = !file.type || file.type === validMimeType || file.type === "application/zip";
+    // Validate Word extensions and MIME types. Legacy .doc files use the
+    // compound binary format, while .docx files are ZIP-based.
+    const isDocx = file.name.toLowerCase().endsWith(".docx");
+    const isDoc = file.name.toLowerCase().endsWith(".doc");
+    const validMimeTypes = [
+      "application/msword",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/zip",
+    ];
+    const isWordMime = !file.type || validMimeTypes.includes(file.type);
 
-    if (!isDocxExtension || (!isDocxMime && file.type)) {
-      setErrorMessage("Berkas tidak valid. Harap unggah berkas Microsoft Word bertipe .docx.");
+    if ((!isDoc && !isDocx) || !isWordMime) {
+      setErrorMessage("Berkas tidak valid. Harap unggah berkas Microsoft Word bertipe .doc atau .docx.");
       setSelectedFile(null);
       return;
     }
@@ -99,11 +104,11 @@ export default function WordUpload({
       <input
         ref={fileInputRef}
         type="file"
-        accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        accept=".doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         onChange={handleFileChange}
         className="d-none"
         id="docx-file-input"
-        aria-label="Pilih berkas Word .docx"
+        aria-label="Pilih berkas Word .doc atau .docx"
       />
 
       {/* Dropzone Container */}
@@ -172,7 +177,7 @@ export default function WordUpload({
               </svg>
             </div>
             <p className="dropzone-title">
-              Tarik dan lepas berkas <strong>.docx</strong>
+              Tarik dan lepas berkas <strong>.doc atau .docx</strong>
             </p>
             <p className="dropzone-hint">atau klik untuk memilih dari perangkat</p>
           </div>
@@ -190,7 +195,7 @@ export default function WordUpload({
       )}
 
       <div className="upload-meta">
-        <span>Hanya .docx</span>
+        <span>.doc atau .docx</span>
         <span>Teks lagu & pengumuman tidak disertakan</span>
       </div>
 

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import WordUpload from "./components/WordUpload";
 import DocxViewer from "./components/DocxViewer";
-import { parseDocxFile, DocxParseResult } from "./utils/docxParser";
+import { parseDocFile, parseDocxFile, DocxParseResult } from "./utils/docxParser";
 
 export default function Home() {
   const [parseResult, setParseResult] = useState<DocxParseResult | null>(null);
@@ -14,14 +14,16 @@ export default function Home() {
     setIsParsing(true);
     setParseError(null);
     try {
-      const result = await parseDocxFile(file);
+      const result = file.name.toLowerCase().endsWith(".doc")
+        ? await parseDocFile(file)
+        : await parseDocxFile(file);
       setParseResult(result);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       console.error("Docx parse error:", err);
       setParseError(
         err?.message ||
-          "Gagal membaca berkas .docx. Harap pastikan berkas tidak rusak.",
+          "Gagal membaca berkas Word. Harap pastikan berkas tidak rusak.",
       );
     } finally {
       setIsParsing(false);
@@ -84,7 +86,7 @@ export default function Home() {
                   <span>01</span>
                   <div>
                     <strong>Unggah naskah</strong>
-                    <p>Pilih dokumen liturgi berformat .docx.</p>
+                    <p>Pilih dokumen liturgi berformat .doc atau .docx.</p>
                   </div>
                 </li>
                 <li>
