@@ -91,6 +91,52 @@ function cleanReadingSource(citation?: string): string {
     .trim();
 }
 
+function splitTextIntoSlideChunks(text: string, maxCharsPerSlide = 260): string[] {
+  const remainingText = text.trim();
+  if (!remainingText) return [""];
+  if (remainingText.length <= maxCharsPerSlide) return [remainingText];
+
+  const chunks: string[] = [];
+  let remaining = remainingText;
+
+  while (remaining.length > maxCharsPerSlide) {
+    const slice = remaining.slice(0, maxCharsPerSlide);
+    const punctuationMatches = [...slice.matchAll(/[.,!?;]\s+/g)];
+    const punctuationCut = punctuationMatches.at(-1);
+    const cutAtPunctuation = punctuationCut
+      ? punctuationCut.index! + punctuationCut[0].length
+      : -1;
+    const cutAtSpace = slice.lastIndexOf(" ");
+    const minimumUsefulChunk = Math.floor(maxCharsPerSlide * 0.35);
+    const cutIndex =
+      cutAtPunctuation > minimumUsefulChunk
+        ? cutAtPunctuation
+        : cutAtSpace > minimumUsefulChunk
+          ? cutAtSpace
+          : maxCharsPerSlide;
+
+    chunks.push(remaining.slice(0, cutIndex).trim());
+    remaining = remaining.slice(cutIndex).trim();
+  }
+
+  if (remaining) chunks.push(remaining);
+  return chunks;
+}
+
+function clipTextOverflow(slideXml: string): string {
+  return slideXml.replace(/<a:bodyPr\b([^>]*)>/g, (bodyPrXml, attributes) => {
+    if (/\bvertOverflow=/.test(bodyPrXml)) return bodyPrXml;
+    return `<a:bodyPr${attributes} vertOverflow="clip">`;
+  });
+}
+
+function removeParagraphWithText(slideXml: string, text: string): string {
+  const normalizedText = normalizeTitle(text);
+  return slideXml.replace(/<a:p>[\s\S]*?<\/a:p>/g, (paragraphXml) =>
+    normalizeTitle(getParagraphText(paragraphXml)) === normalizedText ? "" : paragraphXml,
+  );
+}
+
 function getSlidesInPresentationOrder(zip: JSZip, presentationXml: string, relsXml: string) {
   const targetByRelationshipId: Record<string, string> = {};
   for (const match of relsXml.matchAll(/<Relationship [^>]*Id="([^"]+)" [^>]*Target="([^"]+)"/g)) {
@@ -98,10 +144,10 @@ function getSlidesInPresentationOrder(zip: JSZip, presentationXml: string, relsX
   }
 
   return [...presentationXml.matchAll(/<p:sldId [^>]*r:id="([^"]+)"[^>]*>/g)]
-    .map((match) => targetByRelationshipId[match[1]])
-    .filter((target): target is string => Boolean(target?.startsWith("slides/slide")))
-    .map((target) => `ppt/${target}`)
-    .filter((fileName) => Boolean(zip.file(fileName)));
+    .map((match) => ({ rId: match[1], target: targetByRelationshipId[match[1]] }))
+    .filter((slide): slide is { rId: string; target: string } => Boolean(slide.target?.startsWith("slides/slide")))
+    .map((slide) => ({ rId: slide.rId, fileName: `ppt/${slide.target}` }))
+    .filter((slide) => Boolean(zip.file(slide.fileName)));
 }
 
 export async function generateEnglishMassPptxBuffer(parseResult: EnglishMassParseResult): Promise<Buffer> {
@@ -130,8 +176,78 @@ export async function generateEnglishMassPptxBuffer(parseResult: EnglishMassPars
   let hasReachedIntercessions = false;
   let kyrieIndex = 0;
 
-  for (const fileName of getSlidesInPresentationOrder(zip, presentationXml, presentationRelsXml)) {
-    const slideFile = zip.file(fileName);
+  const slideOrder = getSlidesInPresentationOrder(zip, presentationXml, presentationRelsXml);
+  const relationshipIds = [...presentationRelsXml.matchAll(/<Relationship [^>]*Id="([^"]+)"/g)]
+    .map((match) => Number(match[1].replace(/^rId/, "")))
+    .filter(Number.isFinite);
+  let maxRelationshipId = Math.max(0, ...relationshipIds);
+  const slideIds = [...presentationXml.matchAll(/<p:sldId [^>]*id="(\d+)"/g)]
+    .map((match) => Number(match[1]))
+    .filter(Number.isFinite);
+  let maxSlideId = Math.max(255, ...slideIds);
+
+  const duplicateSlide = async (sourceFileName: string, afterRelationshipId: string, newSlideXml: string) => {
+    const existingSlideNumbers = Object.keys(zip.files)
+      .map((fileName) => fileName.match(/^ppt\/slides\/slide(\d+)\.xml$/)?.[1])
+      .filter((slideNumber): slideNumber is string => Boolean(slideNumber))
+      .map(Number);
+    const newSlideNumber = Math.max(0, ...existingSlideNumbers) + 1;
+    const newFileName = `ppt/slides/slide${newSlideNumber}.xml`;
+    const newRelationshipId = `rId${++maxRelationshipId}`;
+    const newSlideId = ++maxSlideId;
+    zip.file(newFileName, newSlideXml);
+
+    const sourceSlideNumber = sourceFileName.match(/slide(\d+)\.xml$/)?.[1];
+    const sourceRelsFile = sourceSlideNumber
+      ? zip.file(`ppt/slides/_rels/slide${sourceSlideNumber}.xml.rels`)
+      : null;
+    if (sourceRelsFile) {
+      const sourceRelsXml = await sourceRelsFile.async("text");
+      zip.file(
+        `ppt/slides/_rels/slide${newSlideNumber}.xml.rels`,
+        sourceRelsXml.replace(/<Relationship [^>]*Type="http:\/\/schemas\.openxmlformats\.org\/officeDocument\/2006\/relationships\/notesSlide"[^>]*\/>/g, ""),
+      );
+    }
+
+    const contentTypes = await zip.file("[Content_Types].xml")?.async("text");
+    if (contentTypes) {
+      zip.file(
+        "[Content_Types].xml",
+        contentTypes.replace(
+          "</Types>",
+          `<Override PartName="/ppt/slides/slide${newSlideNumber}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/></Types>`,
+        ),
+      );
+    }
+
+    const presentationRels = await zip.file("ppt/_rels/presentation.xml.rels")?.async("text");
+    if (presentationRels) {
+      zip.file(
+        "ppt/_rels/presentation.xml.rels",
+        presentationRels.replace(
+          "</Relationships>",
+          `<Relationship Id="${newRelationshipId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide${newSlideNumber}.xml"/></Relationships>`,
+        ),
+      );
+    }
+
+    const currentPresentation = await zip.file("ppt/presentation.xml")?.async("text");
+    if (currentPresentation) {
+      const newSlideTag = `<p:sldId id="${newSlideId}" r:id="${newRelationshipId}"/>`;
+      const afterSlidePattern = new RegExp(`(<p:sldId [^>]*r:id="${afterRelationshipId}"[^>]*\/?>)`);
+      zip.file(
+        "ppt/presentation.xml",
+        afterSlidePattern.test(currentPresentation)
+          ? currentPresentation.replace(afterSlidePattern, `$1${newSlideTag}`)
+          : currentPresentation.replace("</p:sldIdLst>", `${newSlideTag}</p:sldIdLst>`),
+      );
+    }
+
+    return { newFileName, newRelationshipId };
+  };
+
+  for (const slide of slideOrder) {
+    const slideFile = zip.file(slide.fileName);
     if (!slideFile) continue;
     let slideXml = await slideFile.async("text");
     const slideText = getSlideText(slideXml);
@@ -147,7 +263,27 @@ export async function generateEnglishMassPptxBuffer(parseResult: EnglishMassPars
       slideXml = replaceTokenPlaceholders(slideXml, "judul", [pendingSongTitle]);
       pendingSongTitle = "";
     } else if (slideText.includes("OPENING PRAYER") && textPlaceholderCount) {
-      slideXml = replaceTokenPlaceholders(slideXml, "teks", [getBlockBody(findBlock(parseResult, "OPENING PRAYER"))]);
+      const prayerChunks = splitTextIntoSlideChunks(getBlockBody(findBlock(parseResult, "OPENING PRAYER")));
+      zip.file(
+        slide.fileName,
+        clipTextOverflow(replaceTokenPlaceholders(slideXml, "teks", [prayerChunks[0]])),
+      );
+
+      let previousRelationshipId = slide.rId;
+      for (const prayerChunk of prayerChunks.slice(1)) {
+        const continuationSlide = clipTextOverflow(
+          removeParagraphWithText(
+            removeParagraphWithText(
+              replaceTokenPlaceholders(slideXml, "teks", [prayerChunk]),
+              "OPENING PRAYER",
+            ),
+            "MC: Let us pray.",
+          ),
+        );
+        const duplicate = await duplicateSlide(slide.fileName, previousRelationshipId, continuationSlide);
+        previousRelationshipId = duplicate.newRelationshipId;
+      }
+      continue;
     } else if (slideText.includes("FIRST READING") && textPlaceholderCount) {
       slideXml = replaceTokenPlaceholders(slideXml, "teks", [firstReading?.epigraph ?? "", cleanReadingSource(firstReading?.citation)]);
       pendingReadingBody = firstReading;
@@ -180,7 +316,7 @@ export async function generateEnglishMassPptxBuffer(parseResult: EnglishMassPars
 
     if (slideText.includes("PRAYER OF THE FAITHFUL")) hasReachedIntercessions = true;
     if (slideText.includes("LITURGY OF EUCHARIST")) hasReachedIntercessions = false;
-    zip.file(fileName, slideXml);
+    zip.file(slide.fileName, slideXml);
   }
 
   return zip.generateAsync({ type: "nodebuffer" });
