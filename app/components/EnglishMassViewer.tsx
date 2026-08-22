@@ -53,7 +53,10 @@ export default function EnglishMassViewer({ parseResult, onReset }: EnglishMassV
                     ) : (
                       <p key={`${block.id}-prayer-${index}`} className="mb-1">{paragraph.rawText}</p>
                     );
-                  }) : <>
+                  }) : block.type === "reading" ? <>
+                    {block.body?.map((paragraph, index) => <p key={`${block.id}-body-${index}`} className="mb-1">{paragraph}</p>)}
+                    {block.dialogues.map((line) => <p key={`${line.paragraphIndex}-${line.speaker}`} className="mb-1"><strong>{line.speaker}:</strong> {line.text}</p>)}
+                  </> : <>
                     {block.dialogues.map((line) => <p key={`${line.paragraphIndex}-${line.speaker}`} className="mb-1"><strong>{line.speaker}:</strong> {line.text}</p>)}
                     {block.body?.map((paragraph, index) => <p key={`${block.id}-body-${index}`} className="mb-1">{paragraph}</p>)}
                   </>}
