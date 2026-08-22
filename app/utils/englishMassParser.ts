@@ -183,6 +183,17 @@ function enrichBlock(block: EnglishMassBlock): EnglishMassBlock {
     };
   }
 
+  if (block.type === "gospel_acclamation") {
+    return {
+      ...block,
+      body: block.paragraphs
+        .slice(1)
+        .filter((paragraph) => !getSpeakerLine(paragraph, 0))
+        .map((paragraph) => paragraph.rawText.trim())
+        .filter(Boolean),
+    };
+  }
+
   return block;
 }
 
@@ -227,7 +238,14 @@ export function parseEnglishMassParagraphs(
     currentRite.paragraphs.push(paragraph);
     const blockType = findBlockType(title);
     const dialogue = getSpeakerLine(paragraph, index);
-    if (blockType || (isHeadingCandidate(paragraph) && !dialogue)) {
+    // Acclamation refrains are commonly all caps (for example, "ALLELUIA!").
+    // Treat them as content so they remain in the acclamation body; recognised
+    // block titles above still begin a new block.
+    const isGenericHeading =
+      isHeadingCandidate(paragraph) &&
+      !dialogue &&
+      currentBlock?.type !== "gospel_acclamation";
+    if (blockType || isGenericHeading) {
       finishBlock();
       currentBlock = {
         id: `${currentRite.id}-${currentRite.blocks.length + 1}`,
