@@ -219,7 +219,7 @@ export async function generateEnglishMassPptxBuffer(
 
   let pendingSongTitle = "";
   let pendingReadingBody: EnglishMassBlock | undefined;
-  let pendingReadingIsFirst = false;
+  let pendingReadingUsesContinuationSlides = false;
   let pendingPsalmVerses: string[] = [];
   let hasReachedIntercessions = false;
   let kyrieIndex = 0;
@@ -374,14 +374,14 @@ export async function generateEnglishMassPptxBuffer(
         cleanReadingSource(firstReading?.citation),
       ]);
       pendingReadingBody = firstReading;
-      pendingReadingIsFirst = true;
+      pendingReadingUsesContinuationSlides = true;
     } else if (slideText.includes("SECOND READING") && textPlaceholderCount) {
       slideXml = replaceTokenPlaceholders(slideXml, "teks", [
         secondReading?.epigraph ?? "",
         cleanReadingSource(secondReading?.citation),
       ]);
       pendingReadingBody = secondReading;
-      pendingReadingIsFirst = false;
+      pendingReadingUsesContinuationSlides = true;
     } else if (
       slideText.includes("RESPONSORIAL PSALM") &&
       textPlaceholderCount
@@ -405,7 +405,7 @@ export async function generateEnglishMassPptxBuffer(
         gospel?.epigraph ?? "",
       ]);
       pendingReadingBody = gospel;
-      pendingReadingIsFirst = false;
+      pendingReadingUsesContinuationSlides = true;
     } else if (
       slideText.includes("PRAYER OVER THE OFFERINGS") &&
       textPlaceholderCount
@@ -431,7 +431,7 @@ export async function generateEnglishMassPptxBuffer(
       );
     } else if (pendingReadingBody && textPlaceholderCount) {
       const readingBody = getBlockBody(pendingReadingBody);
-      if (pendingReadingIsFirst) {
+      if (pendingReadingUsesContinuationSlides) {
         const readingChunks = splitTextIntoSlideChunks(readingBody, 380);
         zip.file(
           slide.fileName,
@@ -452,7 +452,7 @@ export async function generateEnglishMassPptxBuffer(
           previousRelationshipId = duplicate.newRelationshipId;
         }
         pendingReadingBody = undefined;
-        pendingReadingIsFirst = false;
+        pendingReadingUsesContinuationSlides = false;
         continue;
       }
 
