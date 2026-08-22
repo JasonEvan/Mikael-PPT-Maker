@@ -4,11 +4,14 @@ import { useState } from "react";
 import WordUpload from "./components/WordUpload";
 import DocxViewer from "./components/DocxViewer";
 import { parseDocFile, parseDocxFile, DocxParseResult } from "./utils/docxParser";
+import EnglishMassViewer from "./components/EnglishMassViewer";
+import { EnglishMassParseResult, parseEnglishMassFile } from "./utils/englishMassParser";
 
 type MassType = "indonesian" | "english";
+type ParseResult = DocxParseResult | EnglishMassParseResult;
 
 export default function Home() {
-  const [parseResult, setParseResult] = useState<DocxParseResult | null>(null);
+  const [parseResult, setParseResult] = useState<ParseResult | null>(null);
   const [isParsing, setIsParsing] = useState<boolean>(false);
   const [parseError, setParseError] = useState<string | null>(null);
   const [massType, setMassType] = useState<MassType>("indonesian");
@@ -17,9 +20,11 @@ export default function Home() {
     setIsParsing(true);
     setParseError(null);
     try {
-      const result = file.name.toLowerCase().endsWith(".doc")
-        ? await parseDocFile(file)
-        : await parseDocxFile(file);
+      const result = massType === "english"
+        ? await parseEnglishMassFile(file)
+        : file.name.toLowerCase().endsWith(".doc")
+          ? await parseDocFile(file)
+          : await parseDocxFile(file);
       setParseResult(result);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
@@ -70,7 +75,11 @@ export default function Home() {
                 onFileConfirmed={handleFileConfirmed}
               />
             </aside>
-            <DocxViewer parseResult={parseResult} onReset={handleReset} />
+            {"massType" in parseResult ? (
+              <EnglishMassViewer parseResult={parseResult} onReset={handleReset} />
+            ) : (
+              <DocxViewer parseResult={parseResult} onReset={handleReset} />
+            )}
           </section>
         ) : (
           <section className="landing-layout">
