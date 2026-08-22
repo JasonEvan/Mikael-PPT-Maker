@@ -253,6 +253,7 @@ export function parseEnglishMassParagraphs(
       isHeadingCandidate(paragraph) &&
       !dialogue &&
       currentBlock?.type !== "gospel_acclamation" &&
+      currentBlock?.type !== "responsorial_psalm" &&
       currentBlock?.type !== "song";
     if (blockType || isGenericHeading) {
       finishBlock();

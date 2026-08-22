@@ -81,6 +81,15 @@ function findBlock(
     .find((block) => normalizeTitle(block.title) === normalizedTitle);
 }
 
+function findBlockByType(
+  result: EnglishMassParseResult,
+  type: EnglishMassBlock["type"],
+): EnglishMassBlock | undefined {
+  return result.rites
+    .flatMap((rite) => rite.blocks)
+    .find((block) => block.type === type);
+}
+
 function getBlockBody(block?: EnglishMassBlock): string {
   if (!block) return "";
   if (block.body?.length) return block.body.join("\n\n");
@@ -204,7 +213,7 @@ export async function generateEnglishMassPptxBuffer(
   const firstReading = findBlock(parseResult, "FIRST READING");
   const secondReading = findBlock(parseResult, "SECOND READING");
   const gospel = findBlock(parseResult, "GOSPEL");
-  const psalm = findBlock(parseResult, "RESPONSORIAL PSALM");
+  const psalm = findBlockByType(parseResult, "responsorial_psalm");
   const intercessions = findBlock(parseResult, "PRAYER OF THE FAITHFUL");
   const kyrie = findBlock(parseResult, "LORD HAVE MERCY");
   const kyrieLines =
@@ -221,6 +230,7 @@ export async function generateEnglishMassPptxBuffer(
   let pendingReadingBody: EnglishMassBlock | undefined;
   let pendingReadingUsesContinuationSlides = false;
   let pendingPsalmVerses: string[] = [];
+  let pendingPsalmRefrain = "";
   let hasReachedIntercessions = false;
   let kyrieIndex = 0;
 
@@ -392,6 +402,7 @@ export async function generateEnglishMassPptxBuffer(
         verses[0] ?? "",
       ]);
       pendingPsalmVerses = verses.slice(1);
+      pendingPsalmRefrain = psalm?.refrain ?? "";
     } else if (
       slideText.includes("GOSPEL ACCLAMATION") &&
       textPlaceholderCount
@@ -459,14 +470,30 @@ export async function generateEnglishMassPptxBuffer(
       slideXml = replaceTokenPlaceholders(slideXml, "teks", [readingBody]);
       pendingReadingBody = undefined;
     } else if (pendingPsalmVerses.length && textPlaceholderCount) {
-      slideXml = replaceTokenPlaceholders(
-        slideXml,
-        "teks",
-        Array.from(
-          { length: textPlaceholderCount },
-          () => pendingPsalmVerses.shift() ?? "",
-        ),
+      const firstContinuationVerse = pendingPsalmVerses.shift() ?? "";
+      zip.file(
+        slide.fileName,
+        replaceTokenPlaceholders(slideXml, "teks", [
+          firstContinuationVerse,
+          pendingPsalmRefrain,
+        ]),
       );
+
+      let previousRelationshipId = slide.rId;
+      for (const verse of pendingPsalmVerses) {
+        const duplicate = await duplicateSlide(
+          slide.fileName,
+          previousRelationshipId,
+          replaceTokenPlaceholders(slideXml, "teks", [
+            verse,
+            pendingPsalmRefrain,
+          ]),
+        );
+        previousRelationshipId = duplicate.newRelationshipId;
+      }
+      pendingPsalmVerses = [];
+      pendingPsalmRefrain = "";
+      continue;
     } else if (
       textPlaceholderCount &&
       /(?:LORD HAVE MERCY|CHRIST HAVE MERCY)/.test(slideText)
