@@ -204,6 +204,43 @@ button, [role="button"], a, select { -webkit-tap-highlight-color: transparent; }
 .upload-panel > * { position: relative; }
 .upload-panel-heading { margin-bottom: 26px; }
 
+.mass-type-selector {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  margin: 0 0 18px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-soft);
+}
+
+.mass-type-selector button {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink-muted);
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 1.25;
+  transition: background-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
+}
+
+.mass-type-selector button:hover { color: var(--ink-soft); }
+
+.mass-type-selector button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.mass-type-selector button.is-selected {
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgb(47 46 41 / 12%);
+  color: var(--accent);
+}
+
 .step-pill {
   display: inline-block;
   margin-bottom: 17px;

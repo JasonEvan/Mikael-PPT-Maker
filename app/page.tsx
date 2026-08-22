@@ -5,10 +5,13 @@ import WordUpload from "./components/WordUpload";
 import DocxViewer from "./components/DocxViewer";
 import { parseDocFile, parseDocxFile, DocxParseResult } from "./utils/docxParser";
 
+type MassType = "indonesian" | "english";
+
 export default function Home() {
   const [parseResult, setParseResult] = useState<DocxParseResult | null>(null);
   const [isParsing, setIsParsing] = useState<boolean>(false);
   const [parseError, setParseError] = useState<string | null>(null);
+  const [massType, setMassType] = useState<MassType>("indonesian");
 
   const handleFileConfirmed = async (file: File) => {
     setIsParsing(true);
@@ -107,13 +110,32 @@ export default function Home() {
             </div>
 
             <div className="upload-panel">
-              <div className="upload-panel-heading">
-                <span className="step-pill">Langkah 1 dari 3</span>
-                <h2>Unggah naskah minggu ini</h2>
-                <p>Kami akan membaca struktur dan memetakan isinya otomatis.</p>
-              </div>
+            <div className="upload-panel-heading">
+              <span className="step-pill">Langkah 1 dari 3</span>
+              <h2>Unggah naskah minggu ini</h2>
+              <p>Kami akan membaca struktur dan memetakan isinya otomatis.</p>
+            </div>
 
-              {isParsing ? (
+            <div className="mass-type-selector" role="group" aria-label="Jenis misa">
+              <button
+                type="button"
+                className={massType === "indonesian" ? "is-selected" : ""}
+                aria-pressed={massType === "indonesian"}
+                onClick={() => setMassType("indonesian")}
+              >
+                Misa Bahasa Indonesia
+              </button>
+              <button
+                type="button"
+                className={massType === "english" ? "is-selected" : ""}
+                aria-pressed={massType === "english"}
+                onClick={() => setMassType("english")}
+              >
+                English Mass
+              </button>
+            </div>
+
+            {isParsing ? (
                 <div className="processing-state" aria-live="polite">
                   <div className="processing-spinner" role="status">
                     <span className="visually-hidden">Memproses...</span>
