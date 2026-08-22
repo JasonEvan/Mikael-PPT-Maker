@@ -256,7 +256,12 @@ button, [role="button"], a, select { -webkit-tap-highlight-color: transparent; }
   transform: translateY(-1px);
 }
 
-.dropzone-content, .selected-file { width: 100%; text-align: center; }
+.dropzone-content, .selected-file {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  text-align: center;
+}
 
 .upload-icon, .file-icon {
   width: 62px;
@@ -287,6 +292,9 @@ button, [role="button"], a, select { -webkit-tap-highlight-color: transparent; }
 }
 
 .selected-file h3 {
+  display: block;
+  width: 100%;
+  max-width: 100%;
   padding: 0 12px;
   overflow: hidden;
   text-overflow: ellipsis;
