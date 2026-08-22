@@ -90,6 +90,19 @@ function findBlockByType(
     .find((block) => block.type === type);
 }
 
+function findSongBlock(
+  result: EnglishMassParseResult,
+  songType: "ENTRANCE" | "OFFERTORY" | "COMMUNION" | "CLOSING",
+): EnglishMassBlock | undefined {
+  return result.rites
+    .flatMap((rite) => rite.blocks)
+    .find(
+      (block) =>
+        block.type === "song" &&
+        normalizeTitle(block.title).startsWith(`${songType} SONG`),
+    );
+}
+
 function getBlockBody(block?: EnglishMassBlock): string {
   if (!block) return "";
   if (block.body?.length) return block.body.join("\n\n");
@@ -155,8 +168,17 @@ function getPrayerOfFaithfulOutro(lines: string[], closingIndex: number): string
 }
 
 function getSongTitle(block?: EnglishMassBlock): string {
+  if (!block) return "";
+
+  const inlineTitle = block.title
+    .replace(/^(?:ENTRANCE|OFFERTORY|COMMUNION|CLOSING) SONG\s*(?::|[-–—])\s*/i, "")
+    .trim();
+  if (inlineTitle && !/^\(?\s*(?:stand|sit|kneel)\s*\)?$/i.test(inlineTitle)) {
+    return inlineTitle;
+  }
+
   return (
-    block?.paragraphs
+    block.paragraphs
       .slice(1)
       .map((paragraph) => paragraph.rawText.trim())
       .find(Boolean) ?? ""
@@ -260,10 +282,10 @@ export async function generateEnglishMassPptxBuffer(
   if (!presentationXml || !presentationRelsXml)
     throw new Error("English Mass template is invalid.");
 
-  const entranceSong = findBlock(parseResult, "ENTRANCE SONG");
-  const offertorySong = findBlock(parseResult, "OFFERTORY SONG");
-  const communionSong = findBlock(parseResult, "COMMUNION SONG");
-  const closingSong = findBlock(parseResult, "CLOSING SONG");
+  const entranceSong = findSongBlock(parseResult, "ENTRANCE");
+  const offertorySong = findSongBlock(parseResult, "OFFERTORY");
+  const communionSong = findSongBlock(parseResult, "COMMUNION");
+  const closingSong = findSongBlock(parseResult, "CLOSING");
   const firstReading = findBlock(parseResult, "FIRST READING");
   const secondReading = findBlock(parseResult, "SECOND READING");
   const gospel = findBlock(parseResult, "GOSPEL");
@@ -295,7 +317,7 @@ export async function generateEnglishMassPptxBuffer(
     intercessionClosingIndex,
   );
 
-  let pendingSongTitle = "";
+  let pendingSongTitle: string | null = null;
   let pendingReadingBody: EnglishMassBlock | undefined;
   let pendingReadingUsesContinuationSlides = false;
   let pendingPsalmVerses: string[] = [];
@@ -412,11 +434,14 @@ export async function generateEnglishMassPptxBuffer(
       pendingSongTitle = getSongTitle(closingSong);
 
     // Song lyrics remain as the template's (teks) placeholder by design.
-    if (pendingSongTitle && countTokenPlaceholders(slideXml, "judul") > 0) {
+    if (
+      pendingSongTitle !== null &&
+      countTokenPlaceholders(slideXml, "judul") > 0
+    ) {
       slideXml = replaceTokenPlaceholders(slideXml, "judul", [
         pendingSongTitle,
       ]);
-      pendingSongTitle = "";
+      pendingSongTitle = null;
     } else if (slideText.includes("OPENING PRAYER") && textPlaceholderCount) {
       const prayerChunks = splitTextIntoSlideChunks(
         getBlockBody(findBlock(parseResult, "OPENING PRAYER")),
