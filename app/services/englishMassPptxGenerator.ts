@@ -100,6 +100,15 @@ function getBlockBody(block?: EnglishMassBlock): string {
     .join("\n\n");
 }
 
+function getGospelAcclamationBody(block?: EnglishMassBlock): string {
+  return getBlockBody(block)
+    .replace(
+      /^(?:\s*(?:R\s*:\s*)?alleluia[!.,;:]*\s*){3}/i,
+      "",
+    )
+    .trimStart();
+}
+
 function getSongTitle(block?: EnglishMassBlock): string {
   return (
     block?.paragraphs
@@ -214,6 +223,10 @@ export async function generateEnglishMassPptxBuffer(
   const secondReading = findBlock(parseResult, "SECOND READING");
   const gospel = findBlock(parseResult, "GOSPEL");
   const psalm = findBlockByType(parseResult, "responsorial_psalm");
+  const gospelAcclamation = findBlockByType(
+    parseResult,
+    "gospel_acclamation",
+  );
   const intercessions = findBlock(parseResult, "PRAYER OF THE FAITHFUL");
   const kyrie = findBlock(parseResult, "LORD HAVE MERCY");
   const kyrieLines =
@@ -408,7 +421,7 @@ export async function generateEnglishMassPptxBuffer(
       textPlaceholderCount
     ) {
       slideXml = replaceTokenPlaceholders(slideXml, "teks", [
-        getBlockBody(findBlock(parseResult, "GOSPEL ACCLAMATION")),
+        getGospelAcclamationBody(gospelAcclamation),
       ]);
     } else if (slideText.includes("GOSPEL") && textPlaceholderCount) {
       slideXml = replaceTokenPlaceholders(slideXml, "teks", [
