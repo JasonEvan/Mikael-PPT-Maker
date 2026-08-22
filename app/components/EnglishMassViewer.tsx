@@ -40,20 +40,35 @@ export default function EnglishMassViewer({ parseResult, onReset }: EnglishMassV
           {parseResult.rites.map((rite) => (
             <section key={rite.id} className="border border-secondary-subtle rounded-3 p-3">
               <h3 className="h6 mb-3">{rite.title}</h3>
-              {rite.blocks.map((block) => (
+              {rite.blocks.filter((block) => block.type !== "creed").map((block) => (
                 <div key={block.id} className="border-top border-secondary-subtle pt-2 mt-2">
                   <div className="d-flex justify-content-between gap-3"><strong>{block.title}</strong><span className="text-muted small">{block.type}{block.posture ? ` · ${block.posture}` : ""}</span></div>
-                  {block.epigraph && <p className="fst-italic mb-1">{block.epigraph}</p>}
-                  {block.citation && <p className="fw-semibold mb-1">{block.citation}</p>}
+                  {block.title.trim().toUpperCase() !== "GOSPEL" && block.epigraph && <p className="fst-italic mb-1">{block.epigraph}</p>}
+                  {block.title.trim().toUpperCase() !== "GOSPEL" && block.citation && <p className="fw-semibold mb-1">{block.citation}</p>}
                   {block.refrain && <p className="fw-semibold mb-1">Refrain: {block.refrain}</p>}
-                  {block.type === "prayer" ? block.paragraphs.slice(1).map((paragraph, index) => {
+              {block.type === "prayer" ? block.paragraphs.slice(1).map((paragraph, index) => {
                     const dialogue = block.dialogues.find((line) => paragraph.rawText.trim().endsWith(line.text));
                     return dialogue ? (
                       <p key={`${block.id}-prayer-${index}`} className="mb-1"><strong>{dialogue.speaker}:</strong> {dialogue.text}</p>
                     ) : (
                       <p key={`${block.id}-prayer-${index}`} className="mb-1">{paragraph.rawText}</p>
                     );
-                  }) : block.type === "reading" ? <>
+                  }) : block.type === "reading" && block.title.trim().toUpperCase() === "GOSPEL" ? <>
+                    {block.citation && <p className="fw-semibold mb-1">{block.citation}</p>}
+                    {block.epigraph && <p className="fst-italic mb-1">{block.epigraph}</p>}
+                    {block.paragraphs.slice(1).map((paragraph, index) => {
+                      const paragraphIndex = index + 1;
+                      const dialogue = block.dialogues.find((line) => line.paragraphIndex === paragraphIndex);
+                      const isSource = dialogue?.text === block.citation;
+                      const isEpigraph = !dialogue && paragraph.rawText.trim() === block.epigraph;
+                      if (isSource || isEpigraph) return null;
+                      return dialogue ? (
+                        <p key={`${block.id}-gospel-${paragraphIndex}`} className="mb-1"><strong>{dialogue.speaker}:</strong> {dialogue.text}</p>
+                      ) : (
+                        <p key={`${block.id}-gospel-${paragraphIndex}`} className="mb-1">{paragraph.rawText}</p>
+                      );
+                    })}
+                  </> : block.type === "reading" ? <>
                     {block.body?.map((paragraph, index) => <p key={`${block.id}-body-${index}`} className="mb-1">{paragraph}</p>)}
                     {block.dialogues.map((line) => <p key={`${line.paragraphIndex}-${line.speaker}`} className="mb-1"><strong>{line.speaker}:</strong> {line.text}</p>)}
                   </> : <>

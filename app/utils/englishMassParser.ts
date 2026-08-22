@@ -157,19 +157,27 @@ function enrichBlock(block: EnglishMassBlock): EnglishMassBlock {
       ? (citationEntry.dialogue?.text ?? citationEntry.paragraph.rawText).trim()
       : undefined;
     const citationIndex = citationEntry?.index ?? -1;
-    const epigraph = nonDialogue.find(({ paragraph, index }) =>
+    const epigraphBeforeCitation = nonDialogue.find(({ paragraph, index }) =>
       index > 0 && index < citationIndex && (paragraph.isItalic || paragraph.rawText.trim().length < 160),
-    )?.paragraph.rawText.trim();
+    );
+    // Gospel epigraphs follow the source dialogue, unlike the other readings.
+    const epigraphAfterCitation = normalize(block.title) === "GOSPEL"
+      ? nonDialogue.find(({ paragraph, index }) =>
+          index > citationIndex && (paragraph.isItalic || paragraph.rawText.trim().length < 160),
+        )
+      : undefined;
+    const epigraphEntry = epigraphBeforeCitation ?? epigraphAfterCitation;
+    const epigraph = epigraphEntry?.paragraph.rawText.trim();
 
     return {
       ...block,
       citation,
       epigraph,
       body: citationIndex >= 0
-        ? block.paragraphs
-            .slice(citationIndex + 1)
-            .filter((paragraph) => !getSpeakerLine(paragraph, 0))
-            .map((paragraph) => paragraph.rawText)
+        ? entries
+            .filter(({ dialogue, index }) => !dialogue && index > citationIndex && index !== epigraphEntry?.index)
+            .map(({ paragraph }) => paragraph.rawText.trim())
+            .filter(Boolean)
         : undefined,
     };
   }
