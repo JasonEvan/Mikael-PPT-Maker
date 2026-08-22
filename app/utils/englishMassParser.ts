@@ -246,13 +246,14 @@ export function parseEnglishMassParagraphs(
     currentRite.paragraphs.push(paragraph);
     const blockType = findBlockType(title);
     const dialogue = getSpeakerLine(paragraph, index);
-    // Acclamation refrains are commonly all caps (for example, "ALLELUIA!").
-    // Treat them as content so they remain in the acclamation body; recognised
-    // block titles above still begin a new block.
+    // Acclamation refrains and song titles are commonly all caps (for example,
+    // "ALLELUIA!"). Treat them as content so they remain with their parent
+    // block; recognised block titles above still begin a new block.
     const isGenericHeading =
       isHeadingCandidate(paragraph) &&
       !dialogue &&
-      currentBlock?.type !== "gospel_acclamation";
+      currentBlock?.type !== "gospel_acclamation" &&
+      currentBlock?.type !== "song";
     if (blockType || isGenericHeading) {
       finishBlock();
       currentBlock = {

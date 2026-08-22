@@ -19,6 +19,34 @@ const hiddenBlockTitles = new Set([
 
 export default function EnglishMassViewer({ parseResult, onReset }: EnglishMassViewerProps) {
   const [showRaw, setShowRaw] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generationError, setGenerationError] = useState<string | null>(null);
+
+  const handleGenerate = async () => {
+    setIsGenerating(true);
+    setGenerationError(null);
+    try {
+      const response = await fetch("/api/generate-pptx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ englishMass: parseResult }),
+      });
+      if (!response.ok) throw new Error((await response.json()).error || "Unable to generate the presentation.");
+
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `Slide_Liturgi_${parseResult.fileName.replace(/\.(?:doc|docx)$/i, "")}_English_Mass.pptx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setGenerationError(error instanceof Error ? error.message : "Unable to generate the presentation.");
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
   return (
     <div className="document-viewer w-100 h-100 d-flex flex-column rounded-4 p-4">
@@ -29,15 +57,19 @@ export default function EnglishMassViewer({ parseResult, onReset }: EnglishMassV
             {parseResult.fileName}
           </h2>
           <p className="small mb-0 mt-1" style={{ color: "#94a3b8" }}>
-            Detected <strong className="text-white">{parseResult.rites.length}</strong> rites and {parseResult.totalParagraphs} paragraphs. Template mapping is not enabled yet.
+            Detected <strong className="text-white">{parseResult.rites.length}</strong> rites and {parseResult.totalParagraphs} paragraphs.
           </p>
         </div>
         <div className="docx-viewer-actions d-flex flex-wrap align-items-center gap-2">
           {onReset && <button type="button" onClick={onReset} className="btn btn-sm btn-outline-light rounded-pill px-3 py-2">Replace file</button>}
+          <button type="button" onClick={handleGenerate} disabled={isGenerating} className="btn btn-sm btn-light rounded-pill px-3 py-2">
+            {isGenerating ? "Generating…" : "Download PowerPoint"}
+          </button>
           <button type="button" onClick={() => setShowRaw((current) => !current)} className="btn btn-sm btn-outline-light rounded-pill px-3 py-2">
             {showRaw ? "Show parsed structure" : "Show raw paragraphs"}
           </button>
         </div>
+        {generationError && <div className="alert alert-danger mb-0" role="alert">{generationError}</div>}
       </div>
 
       {showRaw ? (

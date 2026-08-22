@@ -5,6 +5,8 @@ import {
   generatePPTXOBSBuffer,
   generatePPTXOBSKuningBuffer,
 } from "@/app/services/pptxGeneratorOBS";
+import { generateEnglishMassPptxBuffer } from "@/app/services/englishMassPptxGenerator";
+import { EnglishMassParseResult } from "@/app/utils/englishMassParser";
 
 type TemplateId = "mingguan" | "obs" | "obs-kuning";
 
@@ -12,6 +14,18 @@ type TemplateId = "mingguan" | "obs" | "obs-kuning";
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+    if (body.englishMass?.massType === "english") {
+      const pptxBuffer = await generateEnglishMassPptxBuffer(body.englishMass as EnglishMassParseResult);
+      return new Response(new Uint8Array(pptxBuffer), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+          "Content-Disposition": "attachment; filename=Slide_Liturgi_English_Mass.pptx",
+          "Content-Length": pptxBuffer.length.toString(),
+        },
+      });
+    }
+
     const template: TemplateId =
       body.template === "mingguan" || body.template === "obs-kuning"
         ? body.template
