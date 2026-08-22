@@ -109,6 +109,42 @@ function getGospelAcclamationBody(block?: EnglishMassBlock): string {
     .trimStart();
 }
 
+function isPrayerOfFaithfulTemplateClosing(line: string): boolean {
+  const content = line
+    .replace(/^\s*(?:MC|Main Celebrant \(MC\))\s*:\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return /^We pray for those intentions offered for the Mass/i.test(content);
+}
+
+function getPrayerOfFaithfulOutro(lines: string[], closingIndex: number): string {
+  if (closingIndex === -1) return "";
+
+  const templateClosingLines = [
+    /^We pray for those intentions offered for the Mass/i,
+    /^We also pray for our personal intentions/i,
+    /^Let us pray to the Lord/i,
+    /^Lord, graciously hear us/i,
+    /^Amen\.?$/i,
+  ];
+
+  return lines
+    .slice(closingIndex + 1)
+    .map((line) =>
+      line
+        .replace(
+          /^\s*(?:MC|Main Celebrant \(MC\)|Cs|Celebrants \(Cs\))\s*:\s*/i,
+          "",
+        )
+        .trim(),
+    )
+    .filter(
+      (line) =>
+        line && !templateClosingLines.some((templateLine) => templateLine.test(line)),
+    )
+    .join("\n\n");
+}
+
 function getSongTitle(block?: EnglishMassBlock): string {
   return (
     block?.paragraphs
@@ -227,17 +263,28 @@ export async function generateEnglishMassPptxBuffer(
     parseResult,
     "gospel_acclamation",
   );
-  const intercessions = findBlock(parseResult, "PRAYER OF THE FAITHFUL");
+  const intercessions = findBlockByType(parseResult, "intercessions");
   const kyrie = findBlock(parseResult, "LORD HAVE MERCY");
   const kyrieLines =
     kyrie?.dialogues
       .filter((line) => line.speaker === "MC")
       .map((line) => line.text) ?? [];
-  const intercessionLines =
+  const parsedIntercessionLines =
     intercessions?.paragraphs
       .slice(1)
       .map((paragraph) => paragraph.rawText.trim())
       .filter(Boolean) ?? [];
+  const intercessionClosingIndex = parsedIntercessionLines.findIndex(
+    isPrayerOfFaithfulTemplateClosing,
+  );
+  const intercessionLines =
+    intercessionClosingIndex === -1
+      ? parsedIntercessionLines
+      : parsedIntercessionLines.slice(0, intercessionClosingIndex);
+  let pendingIntercessionOutro = getPrayerOfFaithfulOutro(
+    parsedIntercessionLines,
+    intercessionClosingIndex,
+  );
 
   let pendingSongTitle = "";
   let pendingReadingBody: EnglishMassBlock | undefined;
@@ -444,6 +491,42 @@ export async function generateEnglishMassPptxBuffer(
       slideXml = replaceTokenPlaceholders(slideXml, "teks", [
         getBlockBody(findBlock(parseResult, "PRAYER AFTER COMMUNION")),
       ]);
+    } else if (
+      hasReachedIntercessions &&
+      pendingIntercessionOutro &&
+      /CS\s*:\s*AMEN/.test(slideText) &&
+      textPlaceholderCount
+    ) {
+      slideXml = replaceTokenPlaceholders(slideXml, "teks", [
+        pendingIntercessionOutro,
+      ]);
+      pendingIntercessionOutro = "";
+    } else if (
+      hasReachedIntercessions &&
+      textPlaceholderCount === 2 &&
+      intercessionLines.length
+    ) {
+      zip.file(
+        slide.fileName,
+        replaceTokenPlaceholders(slideXml, "teks", [
+          intercessionLines.shift() ?? "",
+          intercessionLines.shift() ?? "",
+        ]),
+      );
+
+      let previousRelationshipId = slide.rId;
+      while (intercessionLines.length) {
+        const duplicate = await duplicateSlide(
+          slide.fileName,
+          previousRelationshipId,
+          replaceTokenPlaceholders(slideXml, "teks", [
+            intercessionLines.shift() ?? "",
+            intercessionLines.shift() ?? "",
+          ]),
+        );
+        previousRelationshipId = duplicate.newRelationshipId;
+      }
+      continue;
     } else if (hasReachedIntercessions && textPlaceholderCount) {
       slideXml = replaceTokenPlaceholders(
         slideXml,
