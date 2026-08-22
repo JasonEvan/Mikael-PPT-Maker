@@ -8,6 +8,15 @@ interface EnglishMassViewerProps {
   onReset?: () => void;
 }
 
+const hiddenBlockTitles = new Set([
+  "THE PRIEST ADDRESSED THE CONGREGATION",
+  "INVITATION TO PRAYER",
+  "THE EUCHARISTIC PRAYER",
+  "PREFACE",
+  "ACCLAMATION",
+  "EUCHARISTIC PRAYER",
+]);
+
 export default function EnglishMassViewer({ parseResult, onReset }: EnglishMassViewerProps) {
   const [showRaw, setShowRaw] = useState(false);
 
@@ -40,7 +49,16 @@ export default function EnglishMassViewer({ parseResult, onReset }: EnglishMassV
           {parseResult.rites.map((rite) => (
             <section key={rite.id} className="border border-secondary-subtle rounded-3 p-3">
               <h3 className="h6 mb-3">{rite.title}</h3>
-              {rite.blocks.filter((block) => block.type !== "creed").map((block) => (
+              {rite.blocks
+                .filter((block) => {
+                  const normalizedTitle = block.title.trim().toUpperCase();
+                  return !(
+                    hiddenBlockTitles.has(normalizedTitle) ||
+                    normalizedTitle.startsWith("THE PRIEST ADDRESSED THE CONGREGATION")
+                  );
+                })
+                .filter((block) => block.type !== "creed")
+                .map((block) => (
                 <div key={block.id} className="border-top border-secondary-subtle pt-2 mt-2">
                   <div className="d-flex justify-content-between gap-3"><strong>{block.title}</strong><span className="text-muted small">{block.type}{block.posture ? ` · ${block.posture}` : ""}</span></div>
                   {block.title.trim().toUpperCase() !== "GOSPEL" && block.epigraph && <p className="fst-italic mb-1">{block.epigraph}</p>}
