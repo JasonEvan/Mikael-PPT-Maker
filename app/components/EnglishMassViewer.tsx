@@ -52,6 +52,12 @@ export default function EnglishMassViewer({ parseResult, onReset }: EnglishMassV
               {rite.blocks
                 .filter((block) => {
                   const normalizedTitle = block.title.trim().toUpperCase();
+                  if (rite.id === "communion_rite") {
+                    return normalizedTitle.startsWith("COMMUNION SONG") || normalizedTitle === "PRAYER AFTER COMMUNION";
+                  }
+                  if (rite.id === "concluding_rite") {
+                    return normalizedTitle.startsWith("CLOSING SONG");
+                  }
                   return !(
                     hiddenBlockTitles.has(normalizedTitle) ||
                     normalizedTitle.startsWith("THE PRIEST ADDRESSED THE CONGREGATION")
