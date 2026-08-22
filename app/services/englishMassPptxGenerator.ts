@@ -109,6 +109,15 @@ function getGospelAcclamationBody(block?: EnglishMassBlock): string {
     .trimStart();
 }
 
+function getMcPlaceholderBody(block?: EnglishMassBlock): string {
+  return getBlockBody(block)
+    .replace(
+      /(^|\n\s*\n)\s*(?:MC|Main Celebrant \(MC\))\s*:\s*/gi,
+      "$1",
+    )
+    .trim();
+}
+
 function isPrayerOfFaithfulTemplateClosing(line: string): boolean {
   const content = line
     .replace(/^\s*(?:MC|Main Celebrant \(MC\))\s*:\s*/i, "")
@@ -482,7 +491,9 @@ export async function generateEnglishMassPptxBuffer(
       textPlaceholderCount
     ) {
       slideXml = replaceTokenPlaceholders(slideXml, "teks", [
-        getBlockBody(findBlock(parseResult, "PRAYER OVER THE OFFERINGS")),
+        getMcPlaceholderBody(
+          findBlock(parseResult, "PRAYER OVER THE OFFERINGS"),
+        ),
       ]);
     } else if (
       slideText.includes("PRAYER AFTER COMMUNION") &&
