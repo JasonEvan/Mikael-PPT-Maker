@@ -81,8 +81,12 @@ const blockPatterns: Array<{ type: EnglishMassBlockType; pattern: RegExp }> = [
   { type: "intercessions", pattern: /^PRAYER OF THE FAITHFUL\b/ },
   { type: "rubric", pattern: /^(THE PRIEST ADDRESSED|CHURCH NOTICES)\b/ },
   {
+    type: "prayer",
+    pattern: /^(?:OPENING PRAYER|PRAYER OVER THE OFFERINGS|PRAYER AFTER COMMUNION)$/,
+  },
+  {
     type: "section_heading",
-    pattern: /^(?:GREETING|LORD HAVE MERCY|GLORIA|OPENING PRAYER|HOMILY|INVITATION TO PRAYER|PRAYER OVER THE OFFERINGS|THE EUCHARISTIC PRAYER|PREFACE|ACCLAMATION|EUCHARISTIC PRAYER|THE LORD'S PRAYER|THE LORD’S PRAYER|OUR FATHER|SIGN OF PEACE|LAMB OF GOD|BREAKING OF THE BREAD|COMMUNION|PRAYER AFTER COMMUNION|BLESSING AND DISMISSAL)$|^PRAYER FOR ARDAS\b/,
+    pattern: /^(?:GREETING|LORD HAVE MERCY|GLORIA|HOMILY|INVITATION TO PRAYER|THE EUCHARISTIC PRAYER|PREFACE|ACCLAMATION|EUCHARISTIC PRAYER|THE LORD'S PRAYER|THE LORD’S PRAYER|OUR FATHER|SIGN OF PEACE|LAMB OF GOD|BREAKING OF THE BREAD|COMMUNION|BLESSING AND DISMISSAL)$|^PRAYER FOR ARDAS\b/,
   },
 ];
 
@@ -125,6 +129,17 @@ function findBlockType(title: string): EnglishMassBlockType | null {
 }
 
 function enrichBlock(block: EnglishMassBlock): EnglishMassBlock {
+  if (block.type === "prayer") {
+    return {
+      ...block,
+      body: block.paragraphs
+        .slice(1)
+        .filter((paragraph) => !getSpeakerLine(paragraph, 0))
+        .map((paragraph) => paragraph.rawText.trim())
+        .filter(Boolean),
+    };
+  }
+
   if (block.type === "reading") {
     const entries = block.paragraphs.map((paragraph, index) => ({
       paragraph,

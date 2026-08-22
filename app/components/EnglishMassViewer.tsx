@@ -46,7 +46,17 @@ export default function EnglishMassViewer({ parseResult, onReset }: EnglishMassV
                   {block.epigraph && <p className="fst-italic mb-1">{block.epigraph}</p>}
                   {block.citation && <p className="fw-semibold mb-1">{block.citation}</p>}
                   {block.refrain && <p className="fw-semibold mb-1">Refrain: {block.refrain}</p>}
-                  {block.dialogues.map((line) => <p key={`${line.paragraphIndex}-${line.speaker}`} className="mb-1"><strong>{line.speaker}:</strong> {line.text}</p>)}
+                  {block.type === "prayer" ? block.paragraphs.slice(1).map((paragraph, index) => {
+                    const dialogue = block.dialogues.find((line) => paragraph.rawText.trim().endsWith(line.text));
+                    return dialogue ? (
+                      <p key={`${block.id}-prayer-${index}`} className="mb-1"><strong>{dialogue.speaker}:</strong> {dialogue.text}</p>
+                    ) : (
+                      <p key={`${block.id}-prayer-${index}`} className="mb-1">{paragraph.rawText}</p>
+                    );
+                  }) : <>
+                    {block.dialogues.map((line) => <p key={`${line.paragraphIndex}-${line.speaker}`} className="mb-1"><strong>{line.speaker}:</strong> {line.text}</p>)}
+                    {block.body?.map((paragraph, index) => <p key={`${block.id}-body-${index}`} className="mb-1">{paragraph}</p>)}
+                  </>}
                 </div>
               ))}
             </section>
