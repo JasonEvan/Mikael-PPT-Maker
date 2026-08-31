@@ -1032,7 +1032,14 @@ export async function generatePPTXBufferForTemplate(
         260,
       );
 
-      const filledOutroXml = replacePlaceholdersInXml(originalSlideXml, [
+      // The template already contains the fixed "U Amin." response after
+      // the closing-text placeholder. When the closing spans multiple slides,
+      // show that response only after the final chunk.
+      const firstOutroSlideXml =
+        outroChunks.length > 1
+          ? stripClosingParagraphs(originalSlideXml)
+          : originalSlideXml;
+      const filledOutroXml = replacePlaceholdersInXml(firstOutroSlideXml, [
         outroChunks[0] || "",
       ]);
       zip.file(slide.fileName, filledOutroXml);
@@ -1040,7 +1047,11 @@ export async function generatePPTXBufferForTemplate(
       if (outroChunks.length > 1) {
         let lastRId = slide.rId;
         for (let i = 1; i < outroChunks.length; i++) {
-          const filledChunkXml = replacePlaceholdersInXml(originalSlideXml, [
+          const isLast = i === outroChunks.length - 1;
+          const continuationSlideXml = isLast
+            ? originalSlideXml
+            : stripClosingParagraphs(originalSlideXml);
+          const filledChunkXml = replacePlaceholdersInXml(continuationSlideXml, [
             outroChunks[i],
           ]);
           const { newRId } = await duplicateSlide(
