@@ -34,6 +34,7 @@ function generatePPTXOBSBufferForTemplate(
       doaUmatIntentionMaxChars: 210,
       doaSesudahKomuniMaxChars: 210,
       usesPlaceholderOnlyInjilContentSlide: true,
+      omitsGospelCitationPrefix: true,
       usesSinglePlaceholderDoaUmatIntentions: true,
       usesPlaceholderOnlySeruanTobatSlides: true,
     },

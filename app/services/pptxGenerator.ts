@@ -48,6 +48,16 @@ function cleanCitation(citation?: string): string {
   return cleaned.trim();
 }
 
+function cleanGospelCitation(
+  citation?: string,
+  omitGospelPrefix = false,
+): string {
+  const cleaned = cleanCitation(citation);
+  return omitGospelPrefix
+    ? cleaned.replace(/^Injil\s+Suci\s+menurut\s+/i, "").trim()
+    : cleaned;
+}
+
 // ponytail: helper to check if a slide XML contains a (teks) placeholder
 function slideHasPlaceholder(slideXml: string): boolean {
   const pMatches = slideXml.match(/<a:p>[\s\S]*?<\/a:p>/g) || [];
@@ -392,6 +402,7 @@ export interface PptxGeneratorOptions {
   doaUmatIntentionMaxChars?: number;
   doaSesudahKomuniMaxChars?: number;
   usesPlaceholderOnlyInjilContentSlide?: boolean;
+  omitsGospelCitationPrefix?: boolean;
   usesSinglePlaceholderDoaUmatIntentions?: boolean;
   usesPlaceholderOnlySeruanTobatSlides?: boolean;
 }
@@ -813,7 +824,10 @@ export async function generatePPTXBufferForTemplate(
         !slideTextUpper.includes("PENGANTAR"))
     ) {
       const epigraph = formatEpigraph(mappedData.bacaanInjil?.epigraph);
-      const citation = cleanCitation(mappedData.bacaanInjil?.citation);
+      const citation = cleanGospelCitation(
+        mappedData.bacaanInjil?.citation,
+        options.omitsGospelCitationPrefix,
+      );
       slideXml = replacePlaceholdersInXml(slideXml, [epigraph, citation]);
       zip.file(slide.fileName, slideXml);
 
