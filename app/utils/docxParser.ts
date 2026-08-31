@@ -102,6 +102,18 @@ function getRequiredIndonesianSectionTitle(rawText: string): string | null {
   if (/^DOA\s+ATAS\s+PERSEMBAHAN(?:\s*\([^)]*\))?$/i.test(normalized)) {
     return "DOA ATAS PERSEMBAHAN";
   }
+  // These headings can be visually italicized in Indonesian source files,
+  // which makes the generic bold/non-italic heading detector skip them.
+  // They still mark the end of the Gospel and must open their own sections.
+  if (/^HOMILI(?:\s*\([^)]*\))?$/i.test(normalized)) {
+    return "HOMILI";
+  }
+  if (/^SYAHADAT(?:\s*\([^)]*\))?$/i.test(normalized)) {
+    return "SYAHADAT";
+  }
+  if (/^DOA\s+UMAT(?:\s*\([^)]*\))?$/i.test(normalized)) {
+    return "DOA UMAT";
+  }
 
   return null;
 }
