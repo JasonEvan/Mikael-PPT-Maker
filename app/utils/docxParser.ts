@@ -91,6 +91,25 @@ function getHeadingTitleText(p: LiturgyParagraph): string | null {
   return titleText.length > 0 ? titleText : null;
 }
 
+// Some Indonesian source documents italicize these structural headings. They
+// still need to open a dedicated section for the PPTX mapping.
+function getRequiredIndonesianSectionTitle(rawText: string): string | null {
+  const normalized = rawText.replace(/\s+/g, " ").trim().toUpperCase();
+
+  if (/^TOBAT(?:\s*\([^)]*\))?$/i.test(normalized)) {
+    return "SERUAN TOBAT";
+  }
+  if (/^DOA\s+ATAS\s+PERSEMBAHAN(?:\s*\([^)]*\))?$/i.test(normalized)) {
+    return "DOA ATAS PERSEMBAHAN";
+  }
+
+  return null;
+}
+
+function isDoaUmatIntentionStart(text: string): boolean {
+  return /^(?:L|Lektor)[.:\s]+Bagi\s+/i.test(text.trim());
+}
+
 // ponytail: helper to clean formula lines, posture titles, and strip speaker prefixes from prayer bodies
 function cleanPrayerBody(lines: string[], sectionTitle?: string): string {
   // Find index of congregation response (U. Amin / Amin)
@@ -279,12 +298,21 @@ function parseDoaUmatData(section: ParsedLiturgySection): MappedDoaUmat {
     return { intro: "", intentions: [], closing: "" };
   }
 
-  // 1. Intro: First text starting with "I" / "Imam" or validParagraphs[0]
+  // 1. Intro: only text before the first lektor intention can be an intro.
+  // This avoids treating a later "I. Kami mohon…" personal-intention prompt
+  // as the opening prayer.
+  const firstIntentionIndex = validParagraphs.findIndex((p) =>
+    isDoaUmatIntentionStart(p.rawText),
+  );
+  const introCandidates =
+    firstIntentionIndex === -1
+      ? validParagraphs
+      : validParagraphs.slice(0, firstIntentionIndex);
   const introP =
-    validParagraphs.find((p) => {
+    introCandidates.find((p) => {
       const norm = normalizeSpeakerPrefix(p.rawText);
       return /^I[.:\s\t]/i.test(norm) || /^Imam/i.test(norm);
-    }) || validParagraphs[0];
+    }) || introCandidates[0];
   const intro = introP ? stripSpeakerPrefix(introP.rawText) : "";
 
   // 2. Intentions & Outro: Process all valid paragraphs after introP
@@ -631,18 +659,25 @@ export async function parseDocxFile(file: File): Promise<DocxParseResult> {
 
       // Extract text
       let text = "";
-      if (rNode["w:t"]) {
-        if (typeof rNode["w:t"] === "string") {
-          text = rNode["w:t"];
-        } else if (
-          typeof rNode["w:t"] === "object" &&
-          "#text" in rNode["w:t"]
-        ) {
-          text = rNode["w:t"]["#text"];
-        }
-      } else if (rNode["w:tab"]) {
+      if ("w:t" in rNode) {
+        const textNodes = toArray(rNode["w:t"]);
+        const separator = "w:tab" in rNode ? "\t" : "";
+        text = textNodes
+          .map((textNode) => {
+            if (typeof textNode === "string") return textNode;
+            if (
+              typeof textNode === "object" &&
+              textNode !== null &&
+              "#text" in textNode
+            ) {
+              return String(textNode["#text"] ?? "");
+            }
+            return "";
+          })
+          .join(separator);
+      } else if ("w:tab" in rNode) {
         text = "\t";
-      } else if (rNode["w:br"]) {
+      } else if ("w:br" in rNode || "w:cr" in rNode) {
         text = "\n";
       }
 
@@ -755,7 +790,8 @@ function groupIntoSections(
       continue;
     }
 
-    const headingTitle = getHeadingTitleText(p);
+    const headingTitle =
+      getRequiredIndonesianSectionTitle(p.rawText) ?? getHeadingTitleText(p);
 
     // ponytail: check if headingTitle is a bare speaker label (e.g. "U", "L.", "I:")
     const normTitle = headingTitle
@@ -775,6 +811,42 @@ function groupIntoSections(
       currentSection !== null &&
       (currentSection.type === "doa_umat" ||
         currentSection.title.toUpperCase().includes("DOA UMAT"));
+
+    // Some source documents omit the "Doa Umat" heading and begin directly
+    // with the first lektor intention ("L. Bagi …"). Create the missing
+    // structural section so all following intentions stay together.
+    if (!isDoaUmatSection && isDoaUmatIntentionStart(p.rawText)) {
+      const doaUmatIntro: LiturgyParagraph[] = [];
+      const doaUmatIntroBody: string[] = [];
+
+      // In this document format, the priest intro is immediately before the
+      // first lektor intention, so it has already been appended to the
+      // preceding section (normally the Gospel).
+      const previousParagraph = currentSection?.paragraphs[
+        (currentSection?.paragraphs.length ?? 0) - 1
+      ];
+      if (
+        previousParagraph &&
+        /^(?:I|Imam)[.:\s\t]/i.test(normalizeSpeakerPrefix(previousParagraph.rawText))
+      ) {
+        currentSection?.paragraphs.pop();
+        if (currentSection?.body?.[currentSection.body.length - 1] === previousParagraph.rawText) {
+          currentSection.body.pop();
+        }
+        doaUmatIntro.push(previousParagraph);
+        doaUmatIntroBody.push(previousParagraph.rawText);
+      }
+
+      if (currentSection) sections.push(currentSection);
+      currentSection = {
+        id: `section-${sections.length + 1}`,
+        title: "DOA UMAT",
+        type: "doa_umat",
+        paragraphs: [...doaUmatIntro, p],
+        body: [...doaUmatIntroBody, p.rawText],
+      };
+      continue;
+    }
 
     // ponytail: check if paragraph is a scripture reading citation line (defining source)
     const isCitationLine = isReadingCitationLine(p, headingTitle);
