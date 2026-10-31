@@ -6,6 +6,7 @@ import DocxViewer from "./components/DocxViewer";
 import { parseDocFile, parseDocxFile, DocxParseResult } from "./utils/docxParser";
 import EnglishMassViewer from "./components/EnglishMassViewer";
 import { EnglishMassParseResult, parseEnglishMassFile } from "./utils/englishMassParser";
+import HomilyUpload from "./components/HomilyUpload";
 
 type MassType = "indonesian" | "english";
 type ParseResult = DocxParseResult | EnglishMassParseResult;
@@ -15,6 +16,8 @@ export default function Home() {
   const [isParsing, setIsParsing] = useState<boolean>(false);
   const [parseError, setParseError] = useState<string | null>(null);
   const [massType, setMassType] = useState<MassType>("indonesian");
+  const [homily, setHomily] = useState<EnglishMassParseResult["homily"]>();
+  const [isParsingHomily, setIsParsingHomily] = useState(false);
 
   const handleFileConfirmed = async (file: File) => {
     setIsParsing(true);
@@ -41,6 +44,7 @@ export default function Home() {
   const handleReset = () => {
     setParseResult(null);
     setParseError(null);
+    setHomily(undefined);
   };
 
   return (
@@ -70,13 +74,20 @@ export default function Home() {
                 <h1>Ganti naskah</h1>
                 <p>Unggah dokumen lain untuk memulai pemetaan baru.</p>
               </div>
-              <WordUpload
-                compact
-                onFileConfirmed={handleFileConfirmed}
-              />
+              <fieldset disabled={isParsingHomily || isParsing} className="border-0 p-0 m-0">
+                <WordUpload compact onFileConfirmed={handleFileConfirmed} />
+              </fieldset>
+              {"massType" in parseResult && (
+                <HomilyUpload homily={homily} onChange={setHomily} onBusyChange={setIsParsingHomily} />
+              )}
+              {parseError && <div className="form-alert" role="alert">{parseError}</div>}
             </aside>
             {"massType" in parseResult ? (
-              <EnglishMassViewer parseResult={parseResult} onReset={handleReset} />
+              <EnglishMassViewer
+                parseResult={{ ...parseResult, homily }}
+                onReset={handleReset}
+                isUploadingHomily={isParsingHomily}
+              />
             ) : (
               <DocxViewer parseResult={parseResult} onReset={handleReset} />
             )}
@@ -130,7 +141,8 @@ export default function Home() {
                 type="button"
                 className={massType === "indonesian" ? "is-selected" : ""}
                 aria-pressed={massType === "indonesian"}
-                onClick={() => setMassType("indonesian")}
+                disabled={isParsingHomily}
+                onClick={() => { setMassType("indonesian"); setParseError(null); }}
               >
                 Misa Bahasa Indonesia
               </button>
@@ -138,7 +150,8 @@ export default function Home() {
                 type="button"
                 className={massType === "english" ? "is-selected" : ""}
                 aria-pressed={massType === "english"}
-                onClick={() => setMassType("english")}
+                disabled={isParsingHomily}
+                onClick={() => { setMassType("english"); setParseError(null); }}
               >
                 English Mass
               </button>
@@ -157,7 +170,9 @@ export default function Home() {
                 </div>
               ) : (
                 <>
-                  <WordUpload onFileConfirmed={handleFileConfirmed} />
+                  <fieldset disabled={isParsingHomily} className="border-0 p-0 m-0">
+                    <WordUpload onFileConfirmed={handleFileConfirmed} />
+                  </fieldset>
                   {parseError && (
                     <div className="form-alert" role="alert">
                       {parseError}

@@ -30,18 +30,18 @@ predictable structure:
 - **Sub-sections** (e.g. "Doa Kolekta", "Bacaan I", "Bacaan II",
   "Mazmur Tanggapan", "Injil", "Doa Umat", "Doa Atas Persembahan", "Doa
   Sesudah Komuni") are marked with **bold only**, usually followed by an
-  italic annotation like *(umat berdiri)* ("congregation stands") or
-  *(umat duduk)* ("congregation sits").
+  italic annotation like _(umat berdiri)_ ("congregation stands") or
+  _(umat duduk)_ ("congregation sits").
 - Some sub-sections have **no body text** below them (e.g. "Tanda
   Salib", "Kudus", "Homili") — these are sung or led live and should be
   skipped entirely; they never produce a slide.
 - Readings (Bacaan I, Bacaan II, Injil) follow this exact sub-pattern:
   1. An **italicized quoted line** in quotes — a short thematic epigraph
      for the reading (e.g. `*"Berdirilah di atas gunung itu di hadapan
-     Tuhan."*`)
+Tuhan."*`)
   2. A **bold source line** naming the book/chapter/verse, prefixed with
      the speaker label `L` (Lektor), e.g. `L **Bacaan dari Kitab Pertama
-     Raja-raja 19:9a.11-13a**`
+Raja-raja 19:9a.11-13a**`
   3. The **full body text** of the reading (this is long — goes to
      speaker notes, not the visible slide, see mapping below)
   4. A closing formula ("Demikianlah sabda Tuhan" / response)
@@ -103,22 +103,22 @@ deck, week after week, where only specific text placeholders change.
 
 ## Known placeholder-to-slide mapping (MVP scope)
 
-| Content | Slide # | Mode |
-|---|---|---|
-| Seruan Tobat (3 lines) | 22, 23, 24 | Fill if present, else leave blank |
-| Doa Kolekta | 33 | Simple fill |
-| Bacaan Pertama — epigraph quote | 35 (placeholder 1) | Simple fill |
-| Bacaan Pertama — source citation | 35 (placeholder 2) | Simple fill |
-| Bacaan Pertama — full body | notes on slide 35 | Simple fill (notes) |
-| Mazmur Tanggapan verses | 39, 41, 43 | One slide per verse found (2-3 typical) |
-| Bacaan Kedua — epigraph / citation / body | 46 (+ notes) | Same pattern as Bacaan Pertama |
-| Bacaan Injil — Gospel citation (e.g. "Matius 14:22-33") | 50 | Simple fill |
-| Bacaan Injil — epigraph / citation / body | 51 (+ notes) | Same pattern as Bacaan Pertama |
-| Doa Umat — intro line | 68 | Simple fill |
-| Doa Umat — each intention (title + body) | 69 | **Duplicate per intention** (3-5 typical) |
-| Doa Umat — closing line | 71 | Simple fill |
-| Doa Atas Persembahan | 77 | Simple fill |
-| Doa Sesudah Komuni | 97 | Simple fill |
+| Content                                                 | Slide #            | Mode                                      |
+| ------------------------------------------------------- | ------------------ | ----------------------------------------- |
+| Seruan Tobat (3 lines)                                  | 22, 23, 24         | Fill if present, else leave blank         |
+| Doa Kolekta                                             | 33                 | Simple fill                               |
+| Bacaan Pertama — epigraph quote                         | 35 (placeholder 1) | Simple fill                               |
+| Bacaan Pertama — source citation                        | 35 (placeholder 2) | Simple fill                               |
+| Bacaan Pertama — full body                              | notes on slide 35  | Simple fill (notes)                       |
+| Mazmur Tanggapan verses                                 | 39, 41, 43         | One slide per verse found (2-3 typical)   |
+| Bacaan Kedua — epigraph / citation / body               | 46 (+ notes)       | Same pattern as Bacaan Pertama            |
+| Bacaan Injil — Gospel citation (e.g. "Matius 14:22-33") | 50                 | Simple fill                               |
+| Bacaan Injil — epigraph / citation / body               | 51 (+ notes)       | Same pattern as Bacaan Pertama            |
+| Doa Umat — intro line                                   | 68                 | Simple fill                               |
+| Doa Umat — each intention (title + body)                | 69                 | **Duplicate per intention** (3-5 typical) |
+| Doa Umat — closing line                                 | 71                 | Simple fill                               |
+| Doa Atas Persembahan                                    | 77                 | Simple fill                               |
+| Doa Sesudah Komuni                                      | 97                 | Simple fill                               |
 
 Out of scope for MVP (must NOT be touched by the app): song lyrics
 (slides 74, 95, 117), musical notation, church announcements (slides
@@ -151,3 +151,21 @@ be able to: upload this week's Word doc → see a preview of what was
 detected and where it will go → fix anything mis-detected → export the
 final .pptx. Parsing should never silently guess wrong; ambiguous or
 missing sections should be visibly flagged in the preview, not hidden.
+
+## English Mass: homily document
+
+- Select **English Mass** on the first screen and upload its liturgy document.
+- After the liturgy is parsed, the results/preview screen shows the separate
+  **Teks homili (opsional)** uploader. It is not shown on the first screen
+  or for Indonesian Mass. It accepts `.doc` and `.docx`; all readable body
+  paragraphs are included, without filtering headings or speaker labels.
+- The English Mass preview displays the homily's file name and full text.
+  Uploading another homily replaces it; **Hapus homili** removes it.
+  **Replace file** resets both the liturgy preview and the homily.
+- PowerPoint generation follows the template's presentation order, finds
+  `HOMILY`, and fills the following `(teks)` placeholder before the creed.
+  It never relies on a slide number. Long homilies use continuation copies
+  of that placeholder slide, preserving its layout and relationships.
+- Without a homily upload, its text placeholder is cleared. If a homily was
+  supplied but the template has no matching placeholder after `HOMILY`,
+  generation reports an error rather than silently omitting the text.

@@ -1,8 +1,4 @@
-import {
-  LiturgyParagraph,
-  parseDocFile,
-  parseDocxFile,
-} from "./docxParser";
+import { LiturgyParagraph, parseDocFile, parseDocxFile } from "./docxParser";
 
 export type EnglishMassRiteType =
   | "introductory_rites"
@@ -61,14 +57,39 @@ export interface EnglishMassParseResult {
   rawParagraphs: LiturgyParagraph[];
   rites: EnglishMassRite[];
   unclassifiedParagraphs: LiturgyParagraph[];
+  homily?: { fileName: string; paragraphs: string[] };
 }
 
-const majorRites: Array<{ type: EnglishMassRiteType; title: string; pattern: RegExp }> = [
-  { type: "introductory_rites", title: "Introductory Rites", pattern: /^INTRODUCTORY RITES?$/ },
-  { type: "liturgy_of_the_word", title: "Liturgy of the Word", pattern: /^LITURGY OF THE WORD$/ },
-  { type: "liturgy_of_the_eucharist", title: "Liturgy of the Eucharist", pattern: /^LITURGY OF THE EUCHARIST$/ },
-  { type: "communion_rite", title: "Communion Rite", pattern: /^COMMUNION RITE$/ },
-  { type: "concluding_rite", title: "Concluding Rite", pattern: /^CONCLUDING RITE$/ },
+const majorRites: Array<{
+  type: EnglishMassRiteType;
+  title: string;
+  pattern: RegExp;
+}> = [
+  {
+    type: "introductory_rites",
+    title: "Introductory Rites",
+    pattern: /^INTRODUCTORY RITES?$/,
+  },
+  {
+    type: "liturgy_of_the_word",
+    title: "Liturgy of the Word",
+    pattern: /^LITURGY OF THE WORD$/,
+  },
+  {
+    type: "liturgy_of_the_eucharist",
+    title: "Liturgy of the Eucharist",
+    pattern: /^LITURGY OF THE EUCHARIST$/,
+  },
+  {
+    type: "communion_rite",
+    title: "Communion Rite",
+    pattern: /^COMMUNION RITE$/,
+  },
+  {
+    type: "concluding_rite",
+    title: "Concluding Rite",
+    pattern: /^CONCLUDING RITE$/,
+  },
 ];
 
 const blockPatterns: Array<{ type: EnglishMassBlockType; pattern: RegExp }> = [
@@ -77,16 +98,21 @@ const blockPatterns: Array<{ type: EnglishMassBlockType; pattern: RegExp }> = [
   { type: "responsorial_psalm", pattern: /^RESPONSORIAL PSALM\b/ },
   { type: "gospel_acclamation", pattern: /^GOSPEL ACCLAMATION\b/ },
   { type: "reading", pattern: /^GOSPEL$/ },
-  { type: "creed", pattern: /^(PROFESSION|PROFESSSION) OF FAITH\b|^NICENE CREED$/ },
+  {
+    type: "creed",
+    pattern: /^(PROFESSION|PROFESSSION) OF FAITH\b|^NICENE CREED$/,
+  },
   { type: "intercessions", pattern: /^PRAYER OF THE FAITHFUL\b/ },
   { type: "rubric", pattern: /^(THE PRIEST ADDRESSED|CHURCH NOTICES)\b/ },
   {
     type: "prayer",
-    pattern: /^(?:OPENING PRAYER|PRAYER OVER THE OFFERINGS|PRAYER AFTER COMMUNION)$/,
+    pattern:
+      /^(?:OPENING PRAYER|PRAYER OVER THE OFFERINGS|PRAYER AFTER COMMUNION)$/,
   },
   {
     type: "section_heading",
-    pattern: /^(?:GREETING|LORD HAVE MERCY|GLORIA|HOMILY|INVITATION TO PRAYER|THE EUCHARISTIC PRAYER|PREFACE|ACCLAMATION|EUCHARISTIC PRAYER|THE LORD'S PRAYER|THE LORD’S PRAYER|OUR FATHER|SIGN OF PEACE|LAMB OF GOD|BREAKING OF THE BREAD|COMMUNION|BLESSING AND DISMISSAL)$|^PRAYER FOR ARDAS\b/,
+    pattern:
+      /^(?:GREETING|LORD HAVE MERCY|GLORIA|HOMILY|INVITATION TO PRAYER|THE EUCHARISTIC PRAYER|PREFACE|ACCLAMATION|EUCHARISTIC PRAYER|THE LORD'S PRAYER|THE LORD’S PRAYER|OUR FATHER|SIGN OF PEACE|LAMB OF GOD|BREAKING OF THE BREAD|COMMUNION|BLESSING AND DISMISSAL)$|^PRAYER FOR ARDAS\b/,
   },
 ];
 
@@ -99,17 +125,28 @@ function splitPosture(text: string) {
   if (!match) return { title: text.trim() };
   return {
     title: text.slice(0, match.index).trim(),
-    posture: `${match[1][0].toUpperCase()}${match[1].slice(1).toLowerCase()}` as EnglishMassBlock["posture"],
+    posture:
+      `${match[1][0].toUpperCase()}${match[1].slice(1).toLowerCase()}` as EnglishMassBlock["posture"],
   };
 }
 
-function getSpeakerLine(paragraph: LiturgyParagraph, paragraphIndex: number): EnglishMassDialogueLine | null {
-  const match = paragraph.rawText.match(/^\s*(Main Celebrant \(MC\)|Celebrants \(Cs\)|MC|Cs|C\s+s|R|Choir)\s*:\s*(.*)$/i);
+function getSpeakerLine(
+  paragraph: LiturgyParagraph,
+  paragraphIndex: number,
+): EnglishMassDialogueLine | null {
+  const match = paragraph.rawText.match(
+    /^\s*(Main Celebrant \(MC\)|Celebrants \(Cs\)|MC|Cs|C\s+s|R|Choir)\s*:\s*(.*)$/i,
+  );
   if (!match) return null;
 
   const speakerText = match[1].replace(/\s+/g, "").toLowerCase();
-  const speaker: EnglishMassSpeaker =
-    speakerText.includes("mc") ? "MC" : speakerText.includes("cs") ? "Cs" : speakerText === "r" ? "R" : "Choir";
+  const speaker: EnglishMassSpeaker = speakerText.includes("mc")
+    ? "MC"
+    : speakerText.includes("cs")
+      ? "Cs"
+      : speakerText === "r"
+        ? "R"
+        : "Choir";
   return { speaker, text: match[2].trim(), paragraphIndex };
 }
 
@@ -119,13 +156,17 @@ function isHeadingCandidate(paragraph: LiturgyParagraph): boolean {
   return (
     text.length > 0 &&
     text.length <= 100 &&
-    (paragraph.isBold || (letters.length >= 2 && letters === letters.toUpperCase()))
+    (paragraph.isBold ||
+      (letters.length >= 2 && letters === letters.toUpperCase()))
   );
 }
 
 function findBlockType(title: string): EnglishMassBlockType | null {
   const normalizedTitle = normalize(title);
-  return blockPatterns.find(({ pattern }) => pattern.test(normalizedTitle))?.type ?? null;
+  return (
+    blockPatterns.find(({ pattern }) => pattern.test(normalizedTitle))?.type ??
+    null
+  );
 }
 
 function enrichBlock(block: EnglishMassBlock): EnglishMassBlock {
@@ -146,8 +187,7 @@ function enrichBlock(block: EnglishMassBlock): EnglishMassBlock {
       index,
       dialogue: getSpeakerLine(paragraph, index),
     }));
-    const nonDialogue = entries
-      .filter(({ dialogue }) => !dialogue);
+    const nonDialogue = entries.filter(({ dialogue }) => !dialogue);
     const citationEntry = entries.find(({ paragraph, dialogue }) =>
       /^(A reading from|A reading from the|A reading from the Holy Gospel)/i.test(
         (dialogue?.text ?? paragraph.rawText).trim(),
@@ -157,15 +197,21 @@ function enrichBlock(block: EnglishMassBlock): EnglishMassBlock {
       ? (citationEntry.dialogue?.text ?? citationEntry.paragraph.rawText).trim()
       : undefined;
     const citationIndex = citationEntry?.index ?? -1;
-    const epigraphBeforeCitation = nonDialogue.find(({ paragraph, index }) =>
-      index > 0 && index < citationIndex && (paragraph.isItalic || paragraph.rawText.trim().length < 160),
+    const epigraphBeforeCitation = nonDialogue.find(
+      ({ paragraph, index }) =>
+        index > 0 &&
+        index < citationIndex &&
+        (paragraph.isItalic || paragraph.rawText.trim().length < 160),
     );
     // Gospel epigraphs follow the source dialogue, unlike the other readings.
-    const epigraphAfterCitation = normalize(block.title) === "GOSPEL"
-      ? nonDialogue.find(({ paragraph, index }) =>
-          index > citationIndex && (paragraph.isItalic || paragraph.rawText.trim().length < 160),
-        )
-      : undefined;
+    const epigraphAfterCitation =
+      normalize(block.title) === "GOSPEL"
+        ? nonDialogue.find(
+            ({ paragraph, index }) =>
+              index > citationIndex &&
+              (paragraph.isItalic || paragraph.rawText.trim().length < 160),
+          )
+        : undefined;
     const epigraphEntry = epigraphBeforeCitation ?? epigraphAfterCitation;
     const epigraph = epigraphEntry?.paragraph.rawText.trim();
 
@@ -173,17 +219,25 @@ function enrichBlock(block: EnglishMassBlock): EnglishMassBlock {
       ...block,
       citation,
       epigraph,
-      body: citationIndex >= 0
-        ? entries
-            .filter(({ dialogue, index }) => !dialogue && index > citationIndex && index !== epigraphEntry?.index)
-            .map(({ paragraph }) => paragraph.rawText.trim())
-            .filter(Boolean)
-        : undefined,
+      body:
+        citationIndex >= 0
+          ? entries
+              .filter(
+                ({ dialogue, index }) =>
+                  !dialogue &&
+                  index > citationIndex &&
+                  index !== epigraphEntry?.index,
+              )
+              .map(({ paragraph }) => paragraph.rawText.trim())
+              .filter(Boolean)
+          : undefined,
     };
   }
 
   if (block.type === "responsorial_psalm") {
-    const content = block.paragraphs.slice(1).filter((paragraph) => paragraph.rawText.trim());
+    const content = block.paragraphs
+      .slice(1)
+      .filter((paragraph) => paragraph.rawText.trim());
     return {
       ...block,
       refrain: content[0]?.rawText.trim(),
@@ -224,7 +278,9 @@ export function parseEnglishMassParagraphs(
   rawParagraphs.forEach((paragraph, index) => {
     const { title, posture } = splitPosture(paragraph.rawText);
     const normalizedTitle = normalize(title);
-    const majorRite = majorRites.find(({ pattern }) => pattern.test(normalizedTitle));
+    const majorRite = majorRites.find(({ pattern }) =>
+      pattern.test(normalizedTitle),
+    );
 
     if (majorRite) {
       finishBlock();
@@ -293,7 +349,9 @@ export function parseEnglishMassParagraphs(
   };
 }
 
-export async function parseEnglishMassFile(file: File): Promise<EnglishMassParseResult> {
+export async function parseEnglishMassFile(
+  file: File,
+): Promise<EnglishMassParseResult> {
   const source = file.name.toLowerCase().endsWith(".doc")
     ? await parseDocFile(file)
     : await parseDocxFile(file);

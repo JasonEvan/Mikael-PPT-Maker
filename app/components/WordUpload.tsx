@@ -1,6 +1,13 @@
 "use client";
 
-import { useState, useRef, ChangeEvent, DragEvent, KeyboardEvent } from "react";
+import {
+  useState,
+  useRef,
+  useId,
+  ChangeEvent,
+  DragEvent,
+  KeyboardEvent,
+} from "react";
 
 // ponytail: native helper for human-readable file sizes without extra dependencies
 function formatFileSize(bytes: number): string {
@@ -24,6 +31,8 @@ export default function WordUpload({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isDragActive, setIsDragActive] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const instructionsId = useId();
+  const inputId = useId();
 
   const validateAndSelectFile = (file: File) => {
     // Validate Word extensions and MIME types. Legacy .doc files use the
@@ -38,7 +47,9 @@ export default function WordUpload({
     const isWordMime = !file.type || validMimeTypes.includes(file.type);
 
     if ((!isDoc && !isDocx) || !isWordMime) {
-      setErrorMessage("Berkas tidak valid. Harap unggah berkas Microsoft Word bertipe .doc atau .docx.");
+      setErrorMessage(
+        "Berkas tidak valid. Harap unggah berkas Microsoft Word bertipe .doc atau .docx.",
+      );
       setSelectedFile(null);
       return;
     }
@@ -107,7 +118,7 @@ export default function WordUpload({
         accept=".doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         onChange={handleFileChange}
         className="d-none"
-        id="docx-file-input"
+        id={inputId}
         aria-label="Pilih berkas Word .doc atau .docx"
       />
 
@@ -121,7 +132,7 @@ export default function WordUpload({
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         className={`dropzone ${isDragActive ? "drag-active" : ""}`}
-        aria-describedby="dropzone-instructions"
+        aria-describedby={selectedFile ? undefined : instructionsId}
       >
         {selectedFile ? (
           /* Confirmation State */
@@ -142,9 +153,7 @@ export default function WordUpload({
                 />
               </svg>
             </div>
-            <h3 title={selectedFile.name}>
-              {selectedFile.name}
-            </h3>
+            <h3 title={selectedFile.name}>{selectedFile.name}</h3>
             <p>{formatFileSize(selectedFile.size)} · Dokumen Word</p>
             <button
               type="button"
@@ -159,7 +168,7 @@ export default function WordUpload({
           </div>
         ) : (
           /* Resting / Dragging State */
-          <div className="dropzone-content" id="dropzone-instructions">
+          <div className="dropzone-content" id={instructionsId}>
             <div className="upload-icon">
               <svg
                 width="40"
@@ -179,17 +188,16 @@ export default function WordUpload({
             <p className="dropzone-title">
               Tarik dan lepas berkas <strong>.doc atau .docx</strong>
             </p>
-            <p className="dropzone-hint">atau klik untuk memilih dari perangkat</p>
+            <p className="dropzone-hint">
+              atau klik untuk memilih dari perangkat
+            </p>
           </div>
         )}
       </div>
 
       {/* Inline Validation Error Message */}
       {errorMessage && (
-        <div
-          className="form-alert"
-          role="alert"
-        >
+        <div className="form-alert" role="alert">
           {errorMessage}
         </div>
       )}
@@ -206,7 +214,13 @@ export default function WordUpload({
         className="primary-button"
       >
         <span>Proses berkas</span>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          aria-hidden="true"
+        >
           <path d="m9 18 6-6-6-6" />
         </svg>
       </button>

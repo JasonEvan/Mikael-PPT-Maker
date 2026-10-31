@@ -115,19 +115,13 @@ function getBlockBody(block?: EnglishMassBlock): string {
 
 function getGospelAcclamationBody(block?: EnglishMassBlock): string {
   return getBlockBody(block)
-    .replace(
-      /^(?:\s*(?:R\s*:\s*)?alleluia[!.,;:]*\s*){3}/i,
-      "",
-    )
+    .replace(/^(?:\s*(?:R\s*:\s*)?alleluia[!.,;:]*\s*){3}/i, "")
     .trimStart();
 }
 
 function getMcPlaceholderBody(block?: EnglishMassBlock): string {
   return getBlockBody(block)
-    .replace(
-      /(^|\n\s*\n)\s*(?:MC|Main Celebrant \(MC\))\s*:\s*/gi,
-      "$1",
-    )
+    .replace(/(^|\n\s*\n)\s*(?:MC|Main Celebrant \(MC\))\s*:\s*/gi, "$1")
     .trim();
 }
 
@@ -139,7 +133,10 @@ function isPrayerOfFaithfulTemplateClosing(line: string): boolean {
   return /^We pray for those intentions offered for the Mass/i.test(content);
 }
 
-function getPrayerOfFaithfulOutro(lines: string[], closingIndex: number): string {
+function getPrayerOfFaithfulOutro(
+  lines: string[],
+  closingIndex: number,
+): string {
   if (closingIndex === -1) return "";
 
   const templateClosingLines = [
@@ -162,7 +159,8 @@ function getPrayerOfFaithfulOutro(lines: string[], closingIndex: number): string
     )
     .filter(
       (line) =>
-        line && !templateClosingLines.some((templateLine) => templateLine.test(line)),
+        line &&
+        !templateClosingLines.some((templateLine) => templateLine.test(line)),
     )
     .join("\n\n");
 }
@@ -171,7 +169,10 @@ function getSongTitle(block?: EnglishMassBlock): string {
   if (!block) return "";
 
   const inlineTitle = block.title
-    .replace(/^(?:ENTRANCE|OFFERTORY|COMMUNION|CLOSING) SONG\s*(?::|[-–—])\s*/i, "")
+    .replace(
+      /^(?:ENTRANCE|OFFERTORY|COMMUNION|CLOSING) SONG\s*(?::|[-–—])\s*/i,
+      "",
+    )
     .trim();
   if (inlineTitle && !/^\(?\s*(?:stand|sit|kneel)\s*\)?$/i.test(inlineTitle)) {
     return inlineTitle;
@@ -290,10 +291,7 @@ export async function generateEnglishMassPptxBuffer(
   const secondReading = findBlock(parseResult, "SECOND READING");
   const gospel = findBlock(parseResult, "GOSPEL");
   const psalm = findBlockByType(parseResult, "responsorial_psalm");
-  const gospelAcclamation = findBlockByType(
-    parseResult,
-    "gospel_acclamation",
-  );
+  const gospelAcclamation = findBlockByType(parseResult, "gospel_acclamation");
   const intercessions = findBlockByType(parseResult, "intercessions");
   const kyrie = findBlock(parseResult, "LORD HAVE MERCY");
   const kyrieLines =
@@ -324,6 +322,9 @@ export async function generateEnglishMassPptxBuffer(
   let pendingPsalmRefrain = "";
   let hasReachedIntercessions = false;
   let kyrieIndex = 0;
+  let awaitingHomilyText = false;
+  let homilyInserted = false;
+  const homilyText = parseResult.homily?.paragraphs.join("\n\n").trim() ?? "";
 
   const slideOrder = getSlidesInPresentationOrder(
     zip,
@@ -423,6 +424,35 @@ export async function generateEnglishMassPptxBuffer(
     let slideXml = await slideFile.async("text");
     const slideText = getSlideText(slideXml);
     const textPlaceholderCount = countTokenPlaceholders(slideXml, "teks");
+
+    if (/\bHOMILY\b/.test(slideText)) awaitingHomilyText = true;
+    if (
+      /\b(?:PROFES+SION OF FAITH|NICENE CREED|PRAYER OF THE FAITHFUL)\b/.test(
+        slideText,
+      )
+    )
+      awaitingHomilyText = false;
+    if (awaitingHomilyText && textPlaceholderCount) {
+      const chunks = splitTextIntoSlideChunks(homilyText, 380);
+      zip.file(
+        slide.fileName,
+        clipTextOverflow(
+          replaceTokenPlaceholders(slideXml, "teks", [chunks[0]]),
+        ),
+      );
+      let previousRelationshipId = slide.rId;
+      for (const chunk of chunks.slice(1)) {
+        const duplicate = await duplicateSlide(
+          slide.fileName,
+          previousRelationshipId,
+          clipTextOverflow(replaceTokenPlaceholders(slideXml, "teks", [chunk])),
+        );
+        previousRelationshipId = duplicate.newRelationshipId;
+      }
+      homilyInserted = true;
+      awaitingHomilyText = false;
+      continue;
+    }
 
     if (slideText.includes("ENTRANCE SONG"))
       pendingSongTitle = getSongTitle(entranceSong);
@@ -641,6 +671,11 @@ export async function generateEnglishMassPptxBuffer(
       hasReachedIntercessions = false;
     zip.file(slide.fileName, slideXml);
   }
+
+  if (homilyText && !homilyInserted)
+    throw new Error(
+      "Placeholder (teks) setelah HOMILY tidak ditemukan di template English Mass.",
+    );
 
   return zip.generateAsync({ type: "nodebuffer" });
 }
