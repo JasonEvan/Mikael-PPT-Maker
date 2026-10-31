@@ -169,3 +169,62 @@ missing sections should be visibly flagged in the preview, not hidden.
 - Without a homily upload, its text placeholder is cleared. If a homily was
   supplied but the template has no matching placeholder after `HOMILY`,
   generation reports an error rather than silently omitting the text.
+
+## English Mass: measured text layout
+
+- All English dynamic text destinations use `englishMassTextLayout.ts`:
+  song titles, reading introductions/bodies, psalm verses/refrains, acclamation,
+  prayers, intercessions, Kyrie, and homily. There are no character-budget
+  pagination limits in this English export path. Indonesian/OBS generators are
+  intentionally unchanged.
+- Layout is measured with Skia Canvas and the exact template fonts. The engine
+  resolves text-box extents/insets and inherited paragraph/run properties,
+  budgets all paragraphs sharing a shape together, and fills pages with measured
+  lines. Source paragraphs and hard breaks become DrawingML paragraphs/breaks.
+  Ordinary horizontal whitespace is normalized; nonbreaking spaces are retained.
+- Body font size is preserved. The exporter neither clips overflowing content
+  nor relies on viewer AutoFit. Decorative empty template paragraphs are removed
+  only in edited shapes. Reading metadata can continue before the scripture body;
+  prayer/Kyrie responses stay after the continued text. Song lyric placeholders
+  remain intentionally unfilled.
+- Unsupported rotated, grouped, vertical, or multicolumn dynamic text shapes,
+  missing fonts, and indivisible content that cannot fit produce actionable
+  errors instead of hiding or dropping text.
+
+### Required licensed fonts
+
+Provision the template fonts on the generation server **and** on the computer
+displaying the downloaded deck. Fonts are not embedded or redistributed by this
+repository. The normal English template needs Arial bold/bold italic,
+Book Antiqua bold italic, and Arial Rounded MT Bold. Supply other exact styles
+if the template is changed to use them.
+
+- Set `ENGLISH_MASS_FONT_DIR` to a directory of licensed `.ttf` files. When set,
+  only that directory is searched; an invalid configuration never falls back to
+  a different system font.
+- Recognized names include `arialbd.ttf` / `Arial Bold.ttf`,
+  `arialbi.ttf` / `Arial Bold Italic.ttf`, `Book Antiqua Bold Italic.ttf`, and
+  `ArialRoundedMTBold.ttf` / `Arial Rounded Bold.ttf`. Internal font metadata is
+  checked too; renaming a substitute font is not supported.
+- Without the environment variable, the engine searches `app/fonts/english-mass`
+  and the standard macOS Office/system/user font directories. This supports local
+  Office installations without copying proprietary font files into the repo.
+- Next externalizes `skia-canvas` and traces the PPTX templates plus
+  `app/fonts/english-mass/**/*`. For other deployments, install the native
+  dependency for the target OS/architecture and mount/provision the font directory
+  at runtime. Do not reuse a macOS native dependency installation on Linux.
+
+### Verification
+
+Run `npm run test:english` with the licensed fonts provisioned. The layout suite
+covers proportional font widths, shared-shape capacity, inherited styles,
+paragraphs/breaks, metadata continuations, Unicode/nonbreaking groups, changing
+continuation widths, and final-response placement. Generator tests exercise every
+English dynamic role, long Gospel citations, text conservation/order, and absent
+homily behavior. Font-dependent layout cases report an explicit skip when fonts
+are missing; full generator tests require the fonts and fail without them.
+
+Model bounds are not a claim of identical rendering across Office applications.
+Validate representative generated decks in Microsoft PowerPoint after template
+or typography changes, including First Reading introductions/bodies and homily
+first/middle/final pages.

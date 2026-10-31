@@ -5,17 +5,9 @@ import {
   EnglishMassBlock,
   EnglishMassParseResult,
 } from "../utils/englishMassParser";
+import { createEnglishMassTextLayout } from "./englishMassTextLayout";
 
 const ENGLISH_TEMPLATE_FILE = "EM_Template.pptx";
-
-function escapeXml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/\"/g, "&quot;")
-    .replace(/'/g, "&apos;");
-}
 
 function getParagraphText(paragraphXml: string): string {
   return (paragraphXml.match(/<a:t[^>]*>([\s\S]*?)<\/a:t>/g) ?? [])
@@ -37,34 +29,6 @@ function countTokenPlaceholders(slideXml: string, token: string): number {
   return (slideXml.match(/<a:p>[\s\S]*?<\/a:p>/g) ?? []).filter(
     (paragraphXml) => tokenPattern.test(getParagraphText(paragraphXml)),
   ).length;
-}
-
-function replaceTokenPlaceholders(
-  slideXml: string,
-  token: string,
-  replacements: string[],
-): string {
-  const tokenPattern = new RegExp(`\\(\\s*${token}\\s*\\)`, "gi");
-  let replacementIndex = 0;
-
-  return slideXml.replace(/<a:p>[\s\S]*?<\/a:p>/g, (paragraphXml) => {
-    const fullText = getParagraphText(paragraphXml);
-    if (!tokenPattern.test(fullText)) return paragraphXml;
-
-    tokenPattern.lastIndex = 0;
-    const replacement = replacements[replacementIndex++] ?? "";
-    const nextText = fullText.replace(tokenPattern, replacement);
-    let isFirstTextRun = true;
-
-    return paragraphXml.replace(
-      /<a:t([^>]*)>[\s\S]*?<\/a:t>/g,
-      (_match, attributes) => {
-        if (!isFirstTextRun) return `<a:t${attributes}></a:t>`;
-        isFirstTextRun = false;
-        return `<a:t${attributes}>${escapeXml(nextText)}</a:t>`;
-      },
-    );
-  });
 }
 
 function normalizeTitle(title: string): string {
@@ -192,57 +156,6 @@ function cleanReadingSource(citation?: string): string {
     .trim();
 }
 
-function splitTextIntoSlideChunks(
-  text: string,
-  maxCharsPerSlide = 260,
-): string[] {
-  const remainingText = text.trim();
-  if (!remainingText) return [""];
-  if (remainingText.length <= maxCharsPerSlide) return [remainingText];
-
-  const chunks: string[] = [];
-  let remaining = remainingText;
-
-  while (remaining.length > maxCharsPerSlide) {
-    const slice = remaining.slice(0, maxCharsPerSlide);
-    const punctuationMatches = [...slice.matchAll(/[.,!?;]\s+/g)];
-    const punctuationCut = punctuationMatches.at(-1);
-    const cutAtPunctuation = punctuationCut
-      ? punctuationCut.index! + punctuationCut[0].length
-      : -1;
-    const cutAtSpace = slice.lastIndexOf(" ");
-    const minimumUsefulChunk = Math.floor(maxCharsPerSlide * 0.35);
-    const cutIndex =
-      cutAtPunctuation > minimumUsefulChunk
-        ? cutAtPunctuation
-        : cutAtSpace > minimumUsefulChunk
-          ? cutAtSpace
-          : maxCharsPerSlide;
-
-    chunks.push(remaining.slice(0, cutIndex).trim());
-    remaining = remaining.slice(cutIndex).trim();
-  }
-
-  if (remaining) chunks.push(remaining);
-  return chunks;
-}
-
-function clipTextOverflow(slideXml: string): string {
-  return slideXml.replace(/<a:bodyPr\b([^>]*)>/g, (bodyPrXml, attributes) => {
-    if (/\bvertOverflow=/.test(bodyPrXml)) return bodyPrXml;
-    return `<a:bodyPr${attributes} vertOverflow="clip">`;
-  });
-}
-
-function removeParagraphWithText(slideXml: string, text: string): string {
-  const normalizedText = normalizeTitle(text);
-  return slideXml.replace(/<a:p>[\s\S]*?<\/a:p>/g, (paragraphXml) =>
-    normalizeTitle(getParagraphText(paragraphXml)) === normalizedText
-      ? ""
-      : paragraphXml,
-  );
-}
-
 function getSlidesInPresentationOrder(
   zip: JSZip,
   presentationXml: string,
@@ -276,6 +189,7 @@ export async function generateEnglishMassPptxBuffer(
     ENGLISH_TEMPLATE_FILE,
   );
   const zip = await JSZip.loadAsync(await fs.promises.readFile(templatePath));
+  const textLayout = await createEnglishMassTextLayout(zip);
   const presentationXml = await zip.file("ppt/presentation.xml")?.async("text");
   const presentationRelsXml = await zip
     .file("ppt/_rels/presentation.xml.rels")
@@ -317,9 +231,10 @@ export async function generateEnglishMassPptxBuffer(
 
   let pendingSongTitle: string | null = null;
   let pendingReadingBody: EnglishMassBlock | undefined;
-  let pendingReadingUsesContinuationSlides = false;
+  let awaitingReadingBody = false;
   let pendingPsalmVerses: string[] = [];
   let pendingPsalmRefrain = "";
+  let awaitingPsalmContinuation = false;
   let hasReachedIntercessions = false;
   let kyrieIndex = 0;
   let awaitingHomilyText = false;
@@ -418,12 +333,57 @@ export async function generateEnglishMassPptxBuffer(
     return { newFileName, newRelationshipId };
   };
 
-  for (const slide of slideOrder) {
-    const slideFile = zip.file(slide.fileName);
-    if (!slideFile) continue;
-    let slideXml = await slideFile.async("text");
+  const sourceSlides = new Map(
+    await Promise.all(
+      slideOrder.map(
+        async (slide) =>
+          [
+            slide.fileName,
+            await zip.file(slide.fileName)!.async("text"),
+          ] as const,
+      ),
+    ),
+  );
+  const writeSlidePages = async (
+    slide: (typeof slideOrder)[number],
+    pages: readonly string[],
+  ) => {
+    zip.file(slide.fileName, pages[0]);
+    let previousRelationshipId = slide.rId;
+    for (const page of pages.slice(1)) {
+      const duplicate = await duplicateSlide(
+        slide.fileName,
+        previousRelationshipId,
+        page,
+      );
+      previousRelationshipId = duplicate.newRelationshipId;
+    }
+  };
+
+  for (const [slideIndex, slide] of slideOrder.entries()) {
+    const slideXml = sourceSlides.get(slide.fileName)!;
     const slideText = getSlideText(slideXml);
     const textPlaceholderCount = countTokenPlaceholders(slideXml, "teks");
+    const paragraphTexts = (slideXml.match(/<a:p>[\s\S]*?<\/a:p>/g) ?? []).map(
+      getParagraphText,
+    );
+    const matchingTexts = (pattern: RegExp) =>
+      paragraphTexts.filter((text) => pattern.test(text.trim()));
+    const prayerOptions = {
+      firstOnlyTexts: matchingTexts(
+        /^(?:OPENING PRAYER|PRAYER OVER THE OFFERINGS|PRAYER AFTER COMMUNION|MC\s*:)/i,
+      ),
+      lastOnlyTexts: matchingTexts(/^Cs\s*:\s*Amen[.!]?$/i),
+    };
+    const readingOptions = {
+      continuationXml: sourceSlides.get(
+        slideOrder[slideIndex + 1]?.fileName ?? "",
+      ),
+      firstOnlyTexts: matchingTexts(
+        /^(?:FIRST READING|SECOND READING|GOSPEL$|MC\s*:|A reading from)/i,
+      ),
+    };
+    let pages: string[] | undefined;
 
     if (/\bHOMILY\b/.test(slideText)) awaitingHomilyText = true;
     if (
@@ -433,22 +393,10 @@ export async function generateEnglishMassPptxBuffer(
     )
       awaitingHomilyText = false;
     if (awaitingHomilyText && textPlaceholderCount) {
-      const chunks = splitTextIntoSlideChunks(homilyText, 380);
-      zip.file(
-        slide.fileName,
-        clipTextOverflow(
-          replaceTokenPlaceholders(slideXml, "teks", [chunks[0]]),
-        ),
+      await writeSlidePages(
+        slide,
+        textLayout.paginate(slide.fileName, slideXml, "teks", [homilyText]),
       );
-      let previousRelationshipId = slide.rId;
-      for (const chunk of chunks.slice(1)) {
-        const duplicate = await duplicateSlide(
-          slide.fileName,
-          previousRelationshipId,
-          clipTextOverflow(replaceTokenPlaceholders(slideXml, "teks", [chunk])),
-        );
-        previousRelationshipId = duplicate.newRelationshipId;
-      }
       homilyInserted = true;
       awaitingHomilyText = false;
       continue;
@@ -468,133 +416,138 @@ export async function generateEnglishMassPptxBuffer(
       pendingSongTitle !== null &&
       countTokenPlaceholders(slideXml, "judul") > 0
     ) {
-      slideXml = replaceTokenPlaceholders(slideXml, "judul", [
+      pages = textLayout.paginate(slide.fileName, slideXml, "judul", [
         pendingSongTitle,
       ]);
       pendingSongTitle = null;
     } else if (slideText.includes("OPENING PRAYER") && textPlaceholderCount) {
-      const prayerChunks = splitTextIntoSlideChunks(
-        getBlockBody(findBlock(parseResult, "OPENING PRAYER")),
-      );
-      zip.file(
+      pages = textLayout.paginate(
         slide.fileName,
-        clipTextOverflow(
-          replaceTokenPlaceholders(slideXml, "teks", [prayerChunks[0]]),
-        ),
+        slideXml,
+        "teks",
+        [getBlockBody(findBlock(parseResult, "OPENING PRAYER"))],
+        prayerOptions,
       );
-
-      let previousRelationshipId = slide.rId;
-      for (const prayerChunk of prayerChunks.slice(1)) {
-        const continuationSlide = clipTextOverflow(
-          removeParagraphWithText(
-            removeParagraphWithText(
-              replaceTokenPlaceholders(slideXml, "teks", [prayerChunk]),
-              "OPENING PRAYER",
-            ),
-            "MC: Let us pray.",
-          ),
-        );
-        const duplicate = await duplicateSlide(
-          slide.fileName,
-          previousRelationshipId,
-          continuationSlide,
-        );
-        previousRelationshipId = duplicate.newRelationshipId;
-      }
-      continue;
     } else if (slideText.includes("FIRST READING") && textPlaceholderCount) {
-      slideXml = replaceTokenPlaceholders(slideXml, "teks", [
-        firstReading?.epigraph ?? "",
-        cleanReadingSource(firstReading?.citation),
-      ]);
+      pages = textLayout.paginate(
+        slide.fileName,
+        slideXml,
+        "teks",
+        [
+          firstReading?.epigraph ?? "",
+          cleanReadingSource(firstReading?.citation),
+        ],
+        readingOptions,
+      );
       pendingReadingBody = firstReading;
-      pendingReadingUsesContinuationSlides = true;
+      awaitingReadingBody = true;
     } else if (slideText.includes("SECOND READING") && textPlaceholderCount) {
-      slideXml = replaceTokenPlaceholders(slideXml, "teks", [
-        secondReading?.epigraph ?? "",
-        cleanReadingSource(secondReading?.citation),
-      ]);
+      pages = textLayout.paginate(
+        slide.fileName,
+        slideXml,
+        "teks",
+        [
+          secondReading?.epigraph ?? "",
+          cleanReadingSource(secondReading?.citation),
+        ],
+        readingOptions,
+      );
       pendingReadingBody = secondReading;
-      pendingReadingUsesContinuationSlides = true;
+      awaitingReadingBody = true;
     } else if (
       slideText.includes("RESPONSORIAL PSALM") &&
       textPlaceholderCount
     ) {
       const verses = psalm?.body ?? [];
-      slideXml = replaceTokenPlaceholders(slideXml, "teks", [
-        psalm?.refrain ?? "",
-        verses[0] ?? "",
-      ]);
+      pages = textLayout.paginate(
+        slide.fileName,
+        slideXml,
+        "teks",
+        [psalm?.refrain ?? "", verses[0] ?? ""],
+        {
+          firstOnlyTexts: matchingTexts(/^RESPONSORIAL PSALM/i),
+        },
+      );
       pendingPsalmVerses = verses.slice(1);
       pendingPsalmRefrain = psalm?.refrain ?? "";
+      awaitingPsalmContinuation = true;
     } else if (
       slideText.includes("GOSPEL ACCLAMATION") &&
       textPlaceholderCount
     ) {
-      slideXml = replaceTokenPlaceholders(slideXml, "teks", [
-        getGospelAcclamationBody(gospelAcclamation),
-      ]);
+      pages = textLayout.paginate(
+        slide.fileName,
+        slideXml,
+        "teks",
+        [getGospelAcclamationBody(gospelAcclamation)],
+        {
+          firstOnlyTexts: matchingTexts(
+            /^(?:GOSPEL ACCLAMATION|Alleluia!|\(\s*stand\s*\))/i,
+          ),
+        },
+      );
     } else if (slideText.includes("GOSPEL") && textPlaceholderCount) {
-      slideXml = replaceTokenPlaceholders(slideXml, "teks", [
-        cleanReadingSource(gospel?.citation),
-        gospel?.epigraph ?? "",
-      ]);
+      pages = textLayout.paginate(
+        slide.fileName,
+        slideXml,
+        "teks",
+        [cleanReadingSource(gospel?.citation), gospel?.epigraph ?? ""],
+        readingOptions,
+      );
       pendingReadingBody = gospel;
-      pendingReadingUsesContinuationSlides = true;
+      awaitingReadingBody = true;
     } else if (
       slideText.includes("PRAYER OVER THE OFFERINGS") &&
       textPlaceholderCount
     ) {
-      slideXml = replaceTokenPlaceholders(slideXml, "teks", [
-        getMcPlaceholderBody(
-          findBlock(parseResult, "PRAYER OVER THE OFFERINGS"),
-        ),
-      ]);
+      pages = textLayout.paginate(
+        slide.fileName,
+        slideXml,
+        "teks",
+        [
+          getMcPlaceholderBody(
+            findBlock(parseResult, "PRAYER OVER THE OFFERINGS"),
+          ),
+        ],
+        prayerOptions,
+      );
     } else if (
       slideText.includes("PRAYER AFTER COMMUNION") &&
       textPlaceholderCount
     ) {
-      slideXml = replaceTokenPlaceholders(slideXml, "teks", [
-        getBlockBody(findBlock(parseResult, "PRAYER AFTER COMMUNION")),
-      ]);
+      pages = textLayout.paginate(
+        slide.fileName,
+        slideXml,
+        "teks",
+        [getBlockBody(findBlock(parseResult, "PRAYER AFTER COMMUNION"))],
+        prayerOptions,
+      );
     } else if (
       hasReachedIntercessions &&
-      pendingIntercessionOutro &&
       /CS\s*:\s*AMEN/.test(slideText) &&
       textPlaceholderCount
     ) {
-      slideXml = replaceTokenPlaceholders(slideXml, "teks", [
-        pendingIntercessionOutro,
-      ]);
-      pendingIntercessionOutro = "";
-    } else if (
-      hasReachedIntercessions &&
-      textPlaceholderCount === 2 &&
-      intercessionLines.length
-    ) {
-      zip.file(
+      pages = textLayout.paginate(
         slide.fileName,
-        replaceTokenPlaceholders(slideXml, "teks", [
-          intercessionLines.shift() ?? "",
-          intercessionLines.shift() ?? "",
-        ]),
+        slideXml,
+        "teks",
+        [pendingIntercessionOutro],
+        prayerOptions,
       );
-
-      let previousRelationshipId = slide.rId;
-      while (intercessionLines.length) {
-        const duplicate = await duplicateSlide(
-          slide.fileName,
-          previousRelationshipId,
-          replaceTokenPlaceholders(slideXml, "teks", [
+      pendingIntercessionOutro = "";
+    } else if (hasReachedIntercessions && textPlaceholderCount === 2) {
+      pages = [];
+      do {
+        pages.push(
+          ...textLayout.paginate(slide.fileName, slideXml, "teks", [
             intercessionLines.shift() ?? "",
             intercessionLines.shift() ?? "",
           ]),
         );
-        previousRelationshipId = duplicate.newRelationshipId;
-      }
-      continue;
+      } while (intercessionLines.length);
     } else if (hasReachedIntercessions && textPlaceholderCount) {
-      slideXml = replaceTokenPlaceholders(
+      pages = textLayout.paginate(
+        slide.fileName,
         slideXml,
         "teks",
         Array.from(
@@ -602,74 +555,56 @@ export async function generateEnglishMassPptxBuffer(
           () => intercessionLines.shift() ?? "",
         ),
       );
-    } else if (pendingReadingBody && textPlaceholderCount) {
-      const readingBody = getBlockBody(pendingReadingBody);
-      if (pendingReadingUsesContinuationSlides) {
-        const readingChunks = splitTextIntoSlideChunks(readingBody, 380);
-        zip.file(
-          slide.fileName,
-          clipTextOverflow(
-            replaceTokenPlaceholders(slideXml, "teks", [readingChunks[0]]),
-          ),
-        );
-
-        let previousRelationshipId = slide.rId;
-        for (const readingChunk of readingChunks.slice(1)) {
-          const duplicate = await duplicateSlide(
-            slide.fileName,
-            previousRelationshipId,
-            clipTextOverflow(
-              replaceTokenPlaceholders(slideXml, "teks", [readingChunk]),
-            ),
-          );
-          previousRelationshipId = duplicate.newRelationshipId;
-        }
-        pendingReadingBody = undefined;
-        pendingReadingUsesContinuationSlides = false;
-        continue;
-      }
-
-      slideXml = replaceTokenPlaceholders(slideXml, "teks", [readingBody]);
+    } else if (awaitingReadingBody && textPlaceholderCount) {
+      pages = textLayout.paginate(slide.fileName, slideXml, "teks", [
+        getBlockBody(pendingReadingBody),
+      ]);
       pendingReadingBody = undefined;
-    } else if (pendingPsalmVerses.length && textPlaceholderCount) {
-      const firstContinuationVerse = pendingPsalmVerses.shift() ?? "";
-      zip.file(
-        slide.fileName,
-        replaceTokenPlaceholders(slideXml, "teks", [
-          firstContinuationVerse,
+      awaitingReadingBody = false;
+    } else if (awaitingPsalmContinuation && textPlaceholderCount) {
+      pages = [];
+      // Each verse keeps its response after it, even when the pair spills.
+      if (pendingPsalmVerses.length) {
+        for (const verse of pendingPsalmVerses) {
+          pages.push(
+            ...textLayout.paginate(slide.fileName, slideXml, "teks", [
+              verse,
+              pendingPsalmRefrain,
+            ]),
+          );
+        }
+      } else {
+        pages = textLayout.paginate(slide.fileName, slideXml, "teks", [
+          "",
           pendingPsalmRefrain,
-        ]),
-      );
-
-      let previousRelationshipId = slide.rId;
-      for (const verse of pendingPsalmVerses) {
-        const duplicate = await duplicateSlide(
-          slide.fileName,
-          previousRelationshipId,
-          replaceTokenPlaceholders(slideXml, "teks", [
-            verse,
-            pendingPsalmRefrain,
-          ]),
-        );
-        previousRelationshipId = duplicate.newRelationshipId;
+        ]);
       }
       pendingPsalmVerses = [];
       pendingPsalmRefrain = "";
-      continue;
+      awaitingPsalmContinuation = false;
     } else if (
       textPlaceholderCount &&
       /(?:LORD HAVE MERCY|CHRIST HAVE MERCY)/.test(slideText)
     ) {
-      slideXml = replaceTokenPlaceholders(slideXml, "teks", [
-        kyrieLines[kyrieIndex++] ?? "",
-      ]);
+      pages = textLayout.paginate(
+        slide.fileName,
+        slideXml,
+        "teks",
+        [kyrieLines[kyrieIndex++] ?? ""],
+        {
+          firstOnlyTexts: matchingTexts(
+            /^(?:MC\s*:|LORD HAVE MERCY|\(\s*stand\s*\))/i,
+          ),
+          lastOnlyTexts: matchingTexts(/^(?:Choir|Cs)\s*:/i),
+        },
+      );
     }
 
     if (slideText.includes("PRAYER OF THE FAITHFUL"))
       hasReachedIntercessions = true;
     if (slideText.includes("LITURGY OF EUCHARIST"))
       hasReachedIntercessions = false;
-    zip.file(slide.fileName, slideXml);
+    if (pages) await writeSlidePages(slide, pages);
   }
 
   if (homilyText && !homilyInserted)

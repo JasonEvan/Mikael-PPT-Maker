@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:english": "tsx --test app/services/englishMass*.test.ts"
   },
   "dependencies": {
     "@types/word-extractor": "^1.0.6",
@@ -16,6 +17,7 @@
     "next": "16.3.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "skia-canvas": "^4.0.0",
     "word-extractor": "^1.0.4"
   },
   "devDependencies": {
@@ -24,6 +26,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.0",
+    "tsx": "^4.23.15",
     "typescript": "^5"
   }
 }
