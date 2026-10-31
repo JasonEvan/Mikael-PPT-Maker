@@ -194,6 +194,7 @@ export interface EnglishMassTextLayout {
       continuationXml?: string;
       firstOnlyTexts?: readonly string[];
       lastOnlyTexts?: readonly string[];
+      preserveTemplateSpacers?: boolean;
     },
   ): string[];
 }
@@ -715,6 +716,7 @@ export async function createEnglishMassTextLayout(
       const layouts = touched.map((shape, touchedIndex) => {
         const tx = child(shape.node, "p:txBody")!;
         const flow: Paragraph[] = [];
+        const templateSpacers = new Set<Paragraph>();
         for (const source of children(tx).filter(
           (entry) => tag(entry) === "a:p",
         )) {
@@ -725,9 +727,13 @@ export async function createEnglishMassTextLayout(
             options.firstOnlyTexts?.includes(sourceText) ?? false;
           const lastOnly = options.lastOnlyTexts?.includes(sourceText) ?? false;
           if (!matches.length) {
-            // Empty template spacer paragraphs are decorative, not source content.
-            // Removing them is confined to touched shapes (not unrelated static slides).
-            if (!sourceText.trim()) continue;
+            if (!sourceText.trim()) {
+              if (options.preserveTemplateSpacers) {
+                templateSpacers.add(paragraphModel);
+                flow.push(paragraphModel);
+              }
+              continue;
+            }
             paragraphModel.policy = firstOnly
               ? "first"
               : lastOnly
@@ -783,6 +789,39 @@ export async function createEnglishMassTextLayout(
           );
         const firstBox = geometry(file, shape.node),
           nextBox = geometry(file, nextShape.node);
+        if (templateSpacers.size) {
+          let requiredHeight = flow.reduce(
+            (sum, p) =>
+              sum +
+              lines(p, firstBox).reduce(
+                (height, line) => height + cost(line),
+                0,
+              ),
+            0,
+          );
+          while (
+            requiredHeight > firstBox.height + 0.001 &&
+            templateSpacers.size
+          ) {
+            // Reduce double/triple gaps before removing the only gap between
+            // two sections. Only template blanks are disposable, never content.
+            let index = flow.findIndex(
+              (p, i) =>
+                templateSpacers.has(p) &&
+                (templateSpacers.has(flow[i - 1]) ||
+                  templateSpacers.has(flow[i + 1])),
+            );
+            if (index < 0)
+              index = flow.findIndex((p) => templateSpacers.has(p));
+            const spacer = flow[index];
+            requiredHeight -= lines(spacer, firstBox).reduce(
+              (sum, line) => sum + cost(line),
+              0,
+            );
+            templateSpacers.delete(spacer);
+            flow.splice(index, 1);
+          }
+        }
         const pages: Line[][] = [];
         // Each shape has one shared height budget, including every placeholder,
         // fixed heading, response, paragraph gap and first/last-only paragraph.

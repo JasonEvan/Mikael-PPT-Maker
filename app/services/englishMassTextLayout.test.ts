@@ -567,3 +567,73 @@ test(
     );
   },
 );
+
+test(
+  "template gaps survive while fitting and are reduced only as much as overflow requires",
+  { skip: missingFonts },
+  async () => {
+    const layout = await createEnglishMassTextLayout(new JSZip());
+    const ctx = new Canvas(1, 1).getContext("2d");
+    ctx.font = 'normal 700 48px "Arial"';
+    const metrics = ctx.measureText("Alpha");
+    const lineHeight =
+      Math.ceil(
+        (metrics.fontBoundingBoxAscent + metrics.fontBoundingBoxDescent) * 100,
+      ) / 100;
+    const paragraphs =
+      paragraph("HEADING") +
+      paragraph("") +
+      paragraph("") +
+      paragraph("(teks)") +
+      paragraph("") +
+      paragraph("(teks)");
+    for (const [capacity, remainingGaps, pageCount] of [
+      [6, 3, 1],
+      [5, 2, 1],
+      [3, 0, 1],
+      [2, 0, 2],
+    ]) {
+      const pages = layout.paginate(
+        "slide1.xml",
+        slide(paragraphs, 900, lineHeight * capacity),
+        "teks",
+        ["Alpha", "Beta"],
+        { preserveTemplateSpacers: true, firstOnlyTexts: ["HEADING"] },
+      );
+      const output = pages.flatMap((page) => find(parse.parse(page), "a:p"));
+      assert.equal(pages.length, pageCount);
+      assert.equal(
+        output.filter((p) => !content(p).trim()).length,
+        remainingGaps,
+      );
+      assert.equal(visible(pages), "HEADINGAlphaBeta");
+      if (capacity === 5) {
+        assert.deepEqual(
+          output.map(content),
+          ["HEADING", "", "Alpha", "", "Beta"],
+          "reduce the double gap first, keeping a gap between each section",
+        );
+      }
+      validateGeometry(pages, 900, lineHeight * capacity);
+    }
+    const hardBreaks = layout.paginate(
+      "slide1.xml",
+      slide(paragraphs, 900, lineHeight * 4),
+      "teks",
+      ["Alpha\nBeta", "Gamma"],
+      { preserveTemplateSpacers: true, firstOnlyTexts: ["HEADING"] },
+    );
+    assert.equal(visible(hardBreaks), "HEADINGAlphaBetaGamma");
+    assert.equal(
+      find(parse.parse(hardBreaks[0]), "a:br").length,
+      1,
+      "a source hard break is not a disposable template gap",
+    );
+    assert.equal(
+      find(parse.parse(hardBreaks[0]), "a:p").filter((p) => !content(p).trim())
+        .length,
+      0,
+    );
+    validateGeometry(hardBreaks, 900, lineHeight * 4);
+  },
+);

@@ -437,7 +437,7 @@ export async function generateEnglishMassPptxBuffer(
           firstReading?.epigraph ?? "",
           cleanReadingSource(firstReading?.citation),
         ],
-        readingOptions,
+        { ...readingOptions, preserveTemplateSpacers: true },
       );
       pendingReadingBody = firstReading;
       awaitingReadingBody = true;
@@ -450,7 +450,7 @@ export async function generateEnglishMassPptxBuffer(
           secondReading?.epigraph ?? "",
           cleanReadingSource(secondReading?.citation),
         ],
-        readingOptions,
+        { ...readingOptions, preserveTemplateSpacers: true },
       );
       pendingReadingBody = secondReading;
       awaitingReadingBody = true;
@@ -465,6 +465,7 @@ export async function generateEnglishMassPptxBuffer(
         "teks",
         [psalm?.refrain ?? "", verses[0] ?? ""],
         {
+          preserveTemplateSpacers: true,
           firstOnlyTexts: matchingTexts(/^RESPONSORIAL PSALM/i),
         },
       );
@@ -481,6 +482,7 @@ export async function generateEnglishMassPptxBuffer(
         "teks",
         [getGospelAcclamationBody(gospelAcclamation)],
         {
+          preserveTemplateSpacers: true,
           firstOnlyTexts: matchingTexts(
             /^(?:GOSPEL ACCLAMATION|Alleluia!|\(\s*stand\s*\))/i,
           ),
@@ -567,17 +569,23 @@ export async function generateEnglishMassPptxBuffer(
       if (pendingPsalmVerses.length) {
         for (const verse of pendingPsalmVerses) {
           pages.push(
-            ...textLayout.paginate(slide.fileName, slideXml, "teks", [
-              verse,
-              pendingPsalmRefrain,
-            ]),
+            ...textLayout.paginate(
+              slide.fileName,
+              slideXml,
+              "teks",
+              [verse, pendingPsalmRefrain],
+              { preserveTemplateSpacers: true },
+            ),
           );
         }
       } else {
-        pages = textLayout.paginate(slide.fileName, slideXml, "teks", [
-          "",
-          pendingPsalmRefrain,
-        ]);
+        pages = textLayout.paginate(
+          slide.fileName,
+          slideXml,
+          "teks",
+          ["", pendingPsalmRefrain],
+          { preserveTemplateSpacers: true },
+        );
       }
       pendingPsalmVerses = [];
       pendingPsalmRefrain = "";

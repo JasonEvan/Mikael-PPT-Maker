@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import JSZip from "jszip";
@@ -229,4 +230,71 @@ test("a long Gospel citation continues before its response and scripture body", 
   const responseIndex = text.indexOf("Glory to you, Lord.", gospelIndex);
   const citationEnd = text.indexOf(source, gospelIndex) + source.length;
   assert.ok(responseIndex >= citationEnd && text.indexOf(body) > responseIndex);
+});
+
+test("short reading introductions, Alleluia, and psalm keep the template gaps", async () => {
+  const blocks: EnglishMassBlock[] = [
+    {
+      ...block("FIRST READING", "reading", ["Reading body."]),
+      epigraph: "God is love.",
+      citation: "A reading from the Book of Wisdom",
+    },
+    {
+      ...block("SECOND READING", "reading", ["Reading body."]),
+      epigraph: "We shall see God.",
+      citation: "A reading from the Letter of John",
+    },
+    {
+      ...block("RESPONSORIAL PSALM", "responsorial_psalm", [
+        "Give thanks.",
+        "Sing praise.",
+      ]),
+      refrain: "Praise the Lord.",
+    },
+    block("GOSPEL ACCLAMATION", "gospel_acclamation", ["Come to me."]),
+  ];
+  const generated = await slides(
+    await generateEnglishMassPptxBuffer(input(blocks)),
+  );
+  const template = await slides(
+    await fs.readFile(
+      path.join(process.cwd(), "app/template/EM_Template.pptx"),
+    ),
+  );
+  const emptyParagraphs = (xml: string) =>
+    [...xml.matchAll(/<a:p(?:\s[^>]*)?>[\s\S]*?<\/a:p>/g)].filter(
+      (match) =>
+        ![...match[0].matchAll(/<a:t(?:\s[^>]*)?>([\s\S]*?)<\/a:t>/g)]
+          .map((text) => text[1])
+          .join("")
+          .trim(),
+    ).length;
+  for (const heading of [
+    "FIRST READING",
+    "SECOND READING",
+    "GOSPEL ACCLAMATION",
+    "RESPONSORIAL PSALM",
+  ]) {
+    const original = template.find((slide) => slide.text.includes(heading))!;
+    const output = generated.find((slide) => slide.text.includes(heading))!;
+    assert.equal(
+      emptyParagraphs(output.xml),
+      emptyParagraphs(original.xml),
+      `${heading} retains its original gaps when the content fits`,
+    );
+  }
+  const psalmContinuation = generated.find((slide) =>
+    slide.text.includes("Sing praise."),
+  )!;
+  const originalContinuation = template.find(
+    (slide, index) =>
+      index >
+        template.findIndex((entry) =>
+          entry.text.includes("RESPONSORIAL PSALM"),
+        ) && /\(\s*teks\s*\)/i.test(slide.text),
+  )!;
+  assert.equal(
+    emptyParagraphs(psalmContinuation.xml),
+    emptyParagraphs(originalContinuation.xml),
+  );
 });

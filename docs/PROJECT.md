@@ -183,8 +183,13 @@ missing sections should be visibly flagged in the preview, not hidden.
   lines. Source paragraphs and hard breaks become DrawingML paragraphs/breaks.
   Ordinary horizontal whitespace is normalized; nonbreaking spaces are retained.
 - Body font size is preserved. The exporter neither clips overflowing content
-  nor relies on viewer AutoFit. Decorative empty template paragraphs are removed
-  only in edited shapes. Reading metadata can continue before the scripture body;
+  nor relies on viewer AutoFit. First/Second Reading introductions, Gospel
+  Acclamation (Alleluia), and Psalm slides first retain their template's empty
+  spacer paragraphs. Only if the complete shape would overflow are spacers
+  removed one at a time, reducing double/triple gaps before isolated gaps and
+  stopping as soon as the content fits. Source paragraph and hard line breaks
+  are never removed by this fallback. Other edited roles keep their existing
+  compact layout. Reading metadata can still continue before the scripture body;
   prayer/Kyrie responses stay after the continued text. Song lyric placeholders
   remain intentionally unfilled.
 - Unsupported rotated, grouped, vertical, or multicolumn dynamic text shapes,
