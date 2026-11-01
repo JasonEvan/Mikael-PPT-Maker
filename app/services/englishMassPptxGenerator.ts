@@ -5,7 +5,7 @@ import {
   EnglishMassBlock,
   EnglishMassParseResult,
 } from "../utils/englishMassParser";
-import { createEnglishMassTextLayout } from "./englishMassTextLayout";
+import { createPptxTextLayout } from "./pptxTextLayout";
 
 const ENGLISH_TEMPLATE_FILE = "EM_Template.pptx";
 
@@ -189,7 +189,7 @@ export async function generateEnglishMassPptxBuffer(
     ENGLISH_TEMPLATE_FILE,
   );
   const zip = await JSZip.loadAsync(await fs.promises.readFile(templatePath));
-  const textLayout = await createEnglishMassTextLayout(zip);
+  const textLayout = await createPptxTextLayout(zip);
   const presentationXml = await zip.file("ppt/presentation.xml")?.async("text");
   const presentationRelsXml = await zip
     .file("ppt/_rels/presentation.xml.rels")

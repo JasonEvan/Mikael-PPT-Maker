@@ -6,6 +6,7 @@ const nextConfig: NextConfig = {
     "/api/generate-pptx": [
       "./app/template/*.pptx",
       "./app/fonts/english-mass/**/*",
+      "./app/fonts/indonesian-mass/**/*",
     ],
   },
 };

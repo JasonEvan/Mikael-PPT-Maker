@@ -1,315 +1,169 @@
 # PPTX Generation & Structural Mapping Specification
 
-Documentation for the PowerPoint generation service in
-`app/services/pptxGenerator.ts`. This describes what the code actually
-does — verified line-by-line against the implementation, not aspirational
-behavior.
+The Indonesian generators consume `MappedLiturgyData` from
+`app/utils/docxParser.ts`. The template remains the typography and layout
+source; matching uses content anchors and presentation relationships, not
+hardcoded slide indices.
 
----
+## 1. Entry points and scope
 
-## 1. Overview & Core Architecture
+| Entry point                   | Template                       | Text layout                         |
+| ----------------------------- | ------------------------------ | ----------------------------------- |
+| `generatePPTXBuffer`          | `Template_Mingguan.pptx`       | Measured weekly layout              |
+| `generatePPTXOBSBuffer`       | `Template_PPT_OBS_Hijau.pptx`  | Existing OBS character-based layout |
+| `generatePPTXOBSKuningBuffer` | `Template_PPT_OBS_Kuning.pptx` | Existing OBS character-based layout |
 
-The PPTX generation engine takes parsed liturgy data (`MappedLiturgyData`
-from `app/utils/docxParser.ts`) and fills it into the master template
-(`app/template/Template_Mingguan.pptx`), producing a new `.pptx` buffer.
+`generatePPTXBufferForTemplate` remains the legacy public template entry point
+used by OBS. Only the weekly wrapper selects the private measured mode in
+`pptxGenerator.ts`. OBS does not initialize the measured layout/font profile.
+English uses the same measurement implementation, but retains its own generator,
+content mapping, font profile, and pagination policies.
 
-### Core principles
+The API selects the weekly wrapper only for `template: "mingguan"`. Its existing
+OBS/default routing and English early dispatch remain unchanged. DOCX parsing,
+UI, and the `MappedLiturgyData` contract are unchanged.
 
-1. **No hardcoded slide indices for section matching.** Slides are
-   identified by scanning their own visible text for content anchors
-   (e.g. `"MARILAH KITA BERDOA"`, `"BACAAN PERTAMA"`) combined with
-   state-machine flags (`hasPassedDoaUmatTitle`,
-   `hasPassedDoaKomuniTitle`, `hasPassedBacaanPertama`,
-   `hasPassedBacaanKedua`) that track which part of the liturgy the
-   loop has already passed.
-   - **Known exception**: speaker-notes injection (readings) still
-     targets fixed files (`notesSlide2.xml`, `notesSlide3.xml`,
-     `notesSlide6.xml`) rather than being resolved dynamically. This
-     works because the template is fixed and these numbers were
-     confirmed against it, but it means the notes step — unlike slide
-     matching — will break silently if the template's internal notes
-     numbering ever changes.
-2. **OpenXML relationship integrity on duplication.** Duplicating a
-   slide updates every place PowerPoint expects a registered slide to
-   exist:
-   - `[Content_Types].xml` — adds a content-type override for the new
-     slide part.
-   - `ppt/_rels/presentation.xml.rels` — adds a new numeric `rId` →
-     slide file mapping.
-   - `ppt/presentation.xml` — inserts a new `<p:sldId>` entry
-     immediately after the source slide's entry, so ordering stays
-     correct.
-   - The duplicated slide's own `.rels` file is copied from the
-     source, with any `notesSlide` relationship stripped out (to avoid
-     two slides pointing at the same notes part, which corrupts the
-     file).
-3. **Sentence-boundary overflow chunking.** Text that's too long for
-   one slide is split at the last sentence-ending punctuation
-   (`. , ! ? ;`) before the character limit, falling back to a word
-   boundary, falling back to a hard cut — see §3 below for exact
-   behavior and the 35% threshold rule.
+## 2. Weekly measured layout
 
----
+`pptxTextLayout.ts` owns DrawingML measurement and pagination. The generator owns
+liturgy mapping, static first/final content policy, notes, and ZIP assembly.
 
-## 2. Core Helper Functions
+- Resolve the edited shape's extents, insets, paragraph margins/spacing,
+  indentation, and effective run properties through layout/master/theme.
+- Register the exact physical fonts and measure shaped candidate lines with
+  Skia Canvas. All paragraphs sharing a shape use one height budget, including
+  fixed headings, labels, tab stops, responses, and symbols.
+- Preserve intended point sizes. Do not use character budgets, clipping, or
+  viewer AutoFit to make weekly content fit.
+- Preserve template spacer paragraphs first. If the complete edited shape is
+  too tall, remove template blanks one at a time, reducing repeated gaps first,
+  until it fits or no removable spacers remain. Source paragraph/hard breaks
+  are not disposable template spacers.
+- Emit actual DrawingML paragraphs and line breaks. Reflow the remaining source
+  text for continuation geometry instead of treating previous soft wraps as
+  source hard breaks.
+- Keep each psalm verse and each intention as its own ordered page sequence.
+  A new item never shares a preceding item's page merely because space remains.
+- Match split-run `(teks)` / `( teks )` tokens, retaining unaffected styled
+  prefixes/suffixes. Do not run legacy placeholder replacement over final
+  measured slide XML.
 
-| Function                                                        | Purpose                                                                                                                                                                                                                                                                                                                                                             |
-| :-------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `escapeXml(str)`                                                | Escapes `&`, `<`, `>`, `"`, `'` for safe XML insertion.                                                                                                                                                                                                                                                                                                             |
-| `formatEpigraph(epigraph)`                                      | Wraps a reading's epigraph in `"..."` curly quotes if not already quoted.                                                                                                                                                                                                                                                                                           |
-| `cleanCitation(citation)`                                       | Strips leading speaker labels (`L.`, `I.`, `Inilah`, `nilah`, etc.) from a reading's source citation line.                                                                                                                                                                                                                                                          |
-| `slideHasPlaceholder(slideXml)`                                 | Returns `true` if any paragraph's concatenated text matches `(teks)` (whitespace-tolerant, case-insensitive).                                                                                                                                                                                                                                                       |
-| `getPlaceholderCount(slideXml)`                                 | Counts how many paragraphs contain a `(teks)` match.                                                                                                                                                                                                                                                                                                                |
-| `replacePlaceholdersInXml(slideXml, replacements[])`            | Walks paragraphs in order; for each one containing `(teks)`, replaces it with the next value from `replacements[]`. Text runs are merged for matching (so a placeholder split across multiple `<a:r>` runs is still found), and the replacement text is written into the first run of that paragraph, with all other runs in the paragraph cleared.                 |
-| `replaceDoaUmatIntentionInXml(slideXml, title, body, response)` | Specialized filler for the 2-placeholder Doa Umat intention slide: placeholder 1 becomes two paragraphs (bold title, then unbold body); placeholder 2 becomes the congregational response prefixed with `U\t`.                                                                                                                                                      |
-| `stripIntroParagraphs(slideXml)`                                | Inside a `<p:txBody>`, removes every paragraph that comes _before_ the one containing `(teks)` — used so overflow/continuation slides don't repeat a lead-in line like "Marilah kita berdoa".                                                                                                                                                                       |
-| `stripClosingParagraphs(slideXml)`                              | Inside a `<p:txBody>`, removes every paragraph that comes _after_ the one containing `(teks)` — used so non-final overflow slides don't prematurely show a closing line like "U. Amin".                                                                                                                                                                             |
-| `updateNotesSlideXml(notesXml, notesText)`                      | Replaces the contents of the `type="body"` placeholder shape in a notes slide with the supplied text, split into paragraphs on blank lines.                                                                                                                                                                                                                         |
-| `splitTextIntoSlideChunks(text, maxCharsPerSlide)`              | See §3.                                                                                                                                                                                                                                                                                                                                                             |
-| `splitLastSentence(bodyText)`                                   | Splits a block of text into everything except its final sentence, and that final sentence alone — used to keep a Doa Umat intention's closing line ("Kami mohon...") together with the congregational response on the same overflow slide.                                                                                                                          |
-| `duplicateSlide(sourceFileName, targetRId, newSlideXml)`        | Creates a new slide file with the next available slide number, assigns it a new numeric `rId` and `sldId`, inserts it into `presentation.xml` right after `targetRId`, copies (and cleans) the source's `.rels`, and registers it in `[Content_Types].xml`. Returns the new slide's number, filename, and `rId` so callers can chain further duplications after it. |
+String replacements retain the established normalization of ordinary horizontal
+whitespace and CRLF. Structured paragraphs additionally retain semantic tabs,
+including the congregational `U\t` label. Nonbreaking spaces and grapheme
+boundaries are retained by the shared engine's wrapping rules.
 
----
+## 3. Weekly section mapping
 
-## 3. Overflow / Chunking Behavior
+| Content               | Selection/input                                                                                   | Output contract                                                                                     |
+| --------------------- | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Seruan Tobat          | `KASIHANILAH KAMI`; `seruanTobat`                                                                 | Invocation text followed by the template's fixed invocation/response; all share the measured budget |
+| Doa Kolekta           | `MARILAH KITA BERDOA` before Bacaan Pertama; `doaKolekta`                                         | Opening prompt only at the start; fixed response after the final body page                          |
+| Bacaan Pertama        | `BACAAN PERTAMA` / `BACAAN I`; `bacaanPertama`                                                    | Formatted epigraph and cleaned citation visible; complete `notesBody` in original slide notes       |
+| Mazmur Tanggapan      | Psalm anchor or first eligible placeholder between Bacaan Pertama/Kedua; `mazmurTanggapan.verses` | One measured page sequence per verse, in source order                                               |
+| Bacaan Kedua          | `BACAAN KEDUA` / `BACAAN II`; `bacaanKedua`                                                       | Same metadata/notes separation as Bacaan Pertama                                                    |
+| Injil introduction    | `INILAH INJIL SUCI MENURUT`; `bacaanInjil.gospelName`                                             | Preserve the template's dialogue, label, and response order                                         |
+| Injil metadata        | `INJIL`, excluding `PENGANTAR`; `bacaanInjil`                                                     | Epigraph/citation visible; complete `notesBody` in original metadata slide notes                    |
+| Doa Umat introduction | First one-placeholder slide after the Doa Umat title; `doaUmat.intro`                             | Measured introductory text                                                                          |
+| Doa Umat intentions   | Following two-placeholder slide; `doaUmat.intentions`                                             | Bold title once, regular body, original-style response after its own body                           |
+| Doa Umat closing      | Following placeholder/closing slide; `doaUmat.closing`                                            | Complete closing text, then fixed `U Amin` only at the end                                          |
+| Doa Atas Persembahan  | `DOA ATAS PERSEMBAHAN`; `doaAtasPersembahan`                                                      | Heading only initially; fixed response only after the final body                                    |
+| Doa Sesudah Komuni    | `SESUDAH KOMUNI` state; `doaSesudahKomuni`                                                        | Opening prompts initially; preserve any actual fixed closing after the final body                   |
 
-`splitTextIntoSlideChunks(text, maxCharsPerSlide)`:
+`formatEpigraph` retains the existing curly-quote normalization. Citation cleaners
+retain the existing speaker/prefix rules. Weekly does not adopt OBS's optional
+Gospel-source-prefix omission.
 
-- If `text` fits within `maxCharsPerSlide`, returns it as a single
-  one-element array — no splitting happens.
-- Otherwise, repeatedly takes a slice of `maxCharsPerSlide` characters
-  and looks for the **last** occurrence of a sentence-ending
-  punctuation mark followed by whitespace: `. , ! ? ;` (all five are
-  treated as valid cut points — commas are **included**, not
-  excluded).
-  - If that cut point falls after 35% of `maxCharsPerSlide`, the chunk
-    is cut there (keeping the punctuation).
-  - Otherwise, falls back to the last space (word boundary) if it's
-    past the same 35% mark.
-  - Otherwise, falls back to a hard cut at exactly `maxCharsPerSlide`.
-- Repeats on the remainder until what's left fits in one chunk.
+### Doa Umat typography and responses
 
-`splitLastSentence(bodyText)` uses the same 35%-of-length threshold
-idea, but searches for the _last_ sentence delimiter (`. `, `! `, `? `,
-`; `, `… `, or a newline) to peel off only the final sentence, not to
-chunk the whole text.
+Structured replacements inherit the appropriate template token's face, size, and
+fill. Only the title/body bold override is explicit: title bold, body unbold.
+The response retains its separate token's italic/color properties and `U\t` label.
+A fitting response is scheduled at the end, carrying a tail body line with it
+when possible. A response larger than an entire page is ordered content after
+the complete body and may span final pages; it is never dropped or shrunk.
+There is no weekly combined-character threshold or 35%-length sentence heuristic.
 
-Per-section character limits currently in use (passed as
-`maxCharsPerSlide`):
+### Missing content and excluded slides
 
-| Section                                               | Limit |
-| :---------------------------------------------------- | :---- |
-| Doa Kolekta                                           | 260   |
-| Doa Umat — intro                                      | 260   |
-| Doa Umat — intention body                             | 260   |
-| Doa Umat — intention body+response combined threshold | 250   |
-| Doa Umat — outro/closing                              | 260   |
-| Doa Atas Persembahan                                  | 240   |
-| Doa Sesudah Komuni                                    | 280   |
+The existing empty-data behavior is retained. Intended empty destinations remain
+in the deck; zero intentions clear their tokens. Zero psalm verses leave the
+original verse placeholder unchanged. Fewer Seruan items retain the existing
+selection/fallback behavior rather than changing parser semantics.
 
-These limits are approximations tuned by feel, not measured against
-actual template text-box dimensions/font metrics — if a slide is still
-visibly overflowing or under-filled after generation, adjusting the
-relevant limit is the first thing to try.
+Slides containing `PENGUMUMAN` or `LIRIK LAGU` are skipped. Unmatched placeholders,
+song lyrics, static notation, announcements, artwork, and unrelated shapes are
+not globally filled or restyled. The broad psalm fallback still depends on the
+fixed template sequence; new placeholder slides in that interval need review.
 
----
+## 4. Speaker notes and slide-package integrity
 
-## 4. Section Mapping & Execution Rules
+The complete scripture bodies remain **speaker notes only**. Do not borrow
+English's visible reading-body pagination for the Indonesian template.
 
-```mermaid
-flowchart TD
-    A["Uploaded .docx Liturgy Document"] --> B["Parser (docxParser.ts)"]
-    B --> C["MappedLiturgyData Object"]
-    C --> D["Generator Engine (pptxGenerator.ts)"]
-    D --> E["Load Template_Mingguan.pptx"]
-    E --> F["Iterate slides in presentation.xml order"]
-    F --> G{"Content anchor match + state flags"}
-    G -->|Seruan Tobat| H["Fill per-slide, indexed by occurrence"]
-    G -->|Doa Kolekta| I["Fill, overflow-split if needed"]
-    G -->|Bacaan I / II / Injil| J["Fill epigraph+citation, write full body to speaker notes"]
-    G -->|Mazmur Tanggapan| K["Fill verse 1, duplicate per remaining verse"]
-    G -->|Doa Umat| L["Intro -> Intentions -> Outro, each independently overflow-aware"]
-    G -->|Doa Atas Persembahan| M["Fill, overflow-split if needed"]
-    G -->|Doa Sesudah Komuni| N["Fill, overflow-split if needed"]
-    H & I & J & K & L & M & N --> O["Re-zip PPTX buffer"]
-```
+`updateSlideNotes` follows each original slide's own `notesSlide` relationship
+and normalizes its target path. It does not assume `notesSlide2/3/6.xml` or matching
+slide/notes ordinals. Nonempty notes replace the notes body-placeholder paragraphs;
+empty notes leave existing template notes unchanged. Existing missing-notes-part
+behavior is unchanged; this cutover does not create new notes parts.
 
-Every slide with at least one `(teks)` placeholder is checked against
-the rules below, in this order, on every iteration — the **first**
-matching rule handles the slide.
+Every continuation uses the existing `duplicateSlide` machinery:
 
-### Skip rules (checked first)
+- Allocate unique numeric slide IDs, relationship IDs, and slide part names.
+- Register the part in `[Content_Types].xml` and presentation relationships.
+- Insert after the previous page's relationship to preserve item/page order.
+- Copy layout/media relationships, but strip the notes relationship from clones.
+- Keep complete scripture notes attached to the original metadata slide, not
+  shared between multiple slides.
 
-Any placeholder slide whose text contains `"PENGUMUMAN"` or
-`"LIRIK LAGU"` is skipped entirely, untouched.
+## 5. Exact weekly fonts and deployment
 
-#### 1. Seruan Tobat
-- **Anchor**: Slide text containing `"KASIHANILAH KAMI"`.
-- **Parser Logic (`parseSeruanTobatLines` & `stripTobatInvocationEnding`)**:
-  - Scans all lines in the Tobat section and groups priest prayers (`I. ...`), capping at **at most 3 items** (`slice(0, 3)`), stopping before the Absolusi prayer (`Semoga Allah...`).
-  - Strips trailing invocation ending phrases (`Tuhan, kasihanilah kami` / `Kristus, kasihanilah kami`) as they are already present on the template slides.
-  - Filters out congregation response lines (`U. ...`) so that **only Priest ("I") invocation text** is captured into `mappedData.seruanTobat[0..2]`.
-- **Fill Logic**: Fills each captured priest prayer item sequentially into corresponding slides.
-  placeholder; `seruanCount` increments each time this rule fires, so
-  each matching slide gets the next item in order. If there are more
-  matching slides than array items, later slides get an empty string.
+The current weekly template requires Arial regular/bold/italic, Arial Narrow
+regular/bold/italic variants, Lucida Sans bold italic, and Wingdings. Headings
+include 60pt text and the symbol-only Wingdings book icon; body/epigraph/source
+runs are typically 48pt, while `(hening sejenak)` uses 44pt. Do not measure all
+runs as Arial48 or inherit a Latin theme face for an `a:sym` run.
 
-### 2. Doa Kolekta
+Lucida Sans's physical demibold italic face has weight600 even though the
+DrawingML run requests bold. The engine verifies that exact face instead of
+synthesizing weight700 or replacing the family. Symbol runs retain their source
+`a:sym` and glyph; measurement selects the symbol face.
 
-- **Anchor**: slide text contains `"MARILAH KITA BERDOA"` and
-  `hasPassedBacaanPertama` is still `false`.
-- **Limit**: 260 chars.
-- **Overflow**: if the text fits in one chunk, fills the original
-  slide directly. If it needs multiple chunks: the original slide gets
-  its closing paragraph(s) stripped (`stripClosingParagraphs`) and the
-  first chunk; each subsequent duplicated slide gets its intro
-  paragraph(s) stripped (`stripIntroParagraphs`) and its chunk, with
-  the closing line preserved only on the last duplicated slide.
+Set `INDONESIAN_MASS_FONT_DIR` to a directory containing licensed exact faces.
+That override is exclusive. Otherwise the engine searches
+`app/fonts/indonesian-mass` and standard macOS Office/system/user font directories.
+Typical filenames include `Arial.ttf`, `Arial Bold.ttf`, `Arial Italic.ttf`,
+`Arial Narrow Bold.ttf`, `Arial Narrow Bold Italic.ttf`,
+`Lucida Sans Demibold Italic.ttf`, and `Wingdings.ttf`.
 
-### 3. Bacaan Pertama
+Fonts must also exist on presentation computers. This repository does not embed
+or redistribute proprietary fonts. Next externalizes `skia-canvas` and traces
+both profile font folders and templates. Install native dependencies for the
+deployment OS/architecture, and provision/mount licensed fonts at runtime.
+English retains its exclusive `ENGLISH_MASS_FONT_DIR` and existing font behavior.
+OBS does not acquire these font-provisioning requirements.
 
-- **Anchor**: slide text contains `"BACAAN PERTAMA"` or `"BACAAN I "`.
-- **Fill**: placeholder 1 = `formatEpigraph(epigraph)`, placeholder 2 =
-  `cleanCitation(citation)`.
-- **Speaker notes**: full `notesBody` written into
-  `ppt/notesSlides/notesSlide2.xml` (fixed file — see §1 known
-  exception).
+## 6. OBS remains legacy
 
-### 4. Mazmur Tanggapan
+Both OBS wrappers still call `generatePPTXBufferForTemplate` with their existing
+structural flags and limits: Kolekta200, one-placeholder intentions210, and
+postcommunion210 characters. Existing shared legacy branches retain their other
+260/240/250 heuristics where applicable, placeholder-only Seruan/Gospel mapping,
+one-placeholder intention bolding, response placement, and notes handling.
+Those helpers remain live OBS code; they are not weekly fallback paths.
 
-- **Anchor**: slide text contains `"MAZMUR"` or `"TANGGAPAN"`, OR
-  (`hasPassedBacaanPertama` is true AND `hasPassedBacaanKedua` is
-  false) — this fallback branch matches **any** remaining placeholder
-  slide in that range, not just ones that look like a psalm. This is
-  intentionally broad to catch verse-continuation slides that may not
-  repeat the "Mazmur" keyword, but means any other placeholder slide
-  template authors add between Bacaan Pertama and Bacaan Kedua would
-  also be caught by this rule — keep that in mind if the template
-  changes.
-- Only fires once (`!hasHandledMazmur` guard) — verse 1 fills the
-  matched slide directly, then one duplicate is created per remaining
-  verse in `mappedData.mazmurTanggapan.verses`.
+## 7. Verification
 
-### 5. Bacaan Kedua
+- `npm run test:pptx`: shared layout plus English and Indonesian generator tests.
+- `npm run test:english`: English generator and shared layout regressions.
+- `npm run test:indonesian`: weekly/OBS generator and shared layout regressions.
+- Type/lint/build checks do not prove Office rendering.
 
-- **Anchor**: slide text contains `"BACAAN KEDUA"` or `"BACAAN II "`.
-- Same fill pattern as Bacaan Pertama. Speaker notes go to
-  `ppt/notesSlides/notesSlide3.xml`.
-
-### 6. Bacaan Injil — citation intro
-
-- **Anchor**: slide text contains `"INILAH INJIL SUCI MENURUT"`.
-- **Fill**: single placeholder = `mappedData.bacaanInjil.gospelName`
-  (e.g. `"Matius 14:22-33"`).
-
-### 7. Bacaan Injil — content
-
-- **Anchor**: slide text contains `"INJIL"` but not `"PENGANTAR"` (so
-  it doesn't collide with "Bait Pengantar Injil").
-- Same fill pattern as the other readings. Speaker notes go to
-  `ppt/notesSlides/notesSlide6.xml`.
-
-### 8–10. Doa Umat (intro, intentions, outro)
-
-State becomes active once a slide's text contains `"DOA UMAT"` and
-does _not_ contain `"AMIN"` (this distinguishes the title slide from
-the closing slide, which also mentions the section but ends in
-"Amin"). Once active, the next three placeholder-bearing slides are
-consumed in order by sub-rules 8, 9, 10 below; the state resets after
-rule 10 fires so a later, unrelated Doa Umat-like slide (if any)
-wouldn't incorrectly re-trigger this flow.
-
-**8. Intro** — first slide reached with exactly 1 placeholder while
-`hasPassedDoaUmatTitle` is true and the intro hasn't been handled yet.
-Fills `mappedData.doaUmat.intro`, 260-char limit, overflow-aware
-(duplicates with no strip logic — the intro slide layout has no
-intro/closing formula paragraphs to strip).
-
-**9. Intentions** — next slide reached with 2+ placeholders. For each
-item in `mappedData.doaUmat.intentions`:
-
-- Its body is chunked at 260 chars.
-- Each non-final chunk fills a slide with title (first chunk only) +
-  body, no response text.
-- The final chunk is checked against `response.length + chunk.length
-  > 250`: if it fits, title/body/response go on one slide. If not,
-`splitLastSentence` peels the intention's last sentence (typically
-  > "Kami mohon...") off the body, puts the bulk of the body on one
-  > slide (no response yet), and puts the peeled last sentence together
-  > with the response on the following duplicated slide — so the
-  > "prompt" line and the congregation's reply always appear together.
-- If there are zero intentions, both placeholders on the matched slide
-  are cleared to empty strings (slide stays in the deck, blank).
-#### 9. Doa Umat Intentions
-- **Anchor**: Slide text containing `"DOA UMAT"` and containing $\ge 2$ placeholders (`(teks)`).
-- **Parser Logic (`parseDoaUmatData` & `cleanIntentionBodyLines`)**:
-  - Accumulates multi-paragraph intention blocks (`L. Bagi...`, `Ya Bapa...`, `Marilah kita mohon …`, `U. ...`) into single structured items `{ title, body, response }`.
-  - Continuation lines (including `Marilah kita mohon …`) are grouped into the intention's `body` rather than being treated as independent intentions.
-  - Deduplicates adjacent identical formula prompt lines.
-- **Overflow Handling**:
-  - If intention body exceeds 220 chars or combined body + response exceeds 220 chars, splits cleanly across slides at sentence boundaries (`[.!?]`).
-  - Slide 1 contains Title + Body Chunk 1; Slide 2+ contains remaining body chunk / last sentence + yellow italic response `U. [Response]`.r text, and appends `U. Amin` on the final chunk.
-
-**10. Outro** — next slide reached after intentions are handled. Fills
-`mappedData.doaUmat.closing`, 260-char limit, overflow-aware, no strip
-logic (same reasoning as intro).
-
-#### 11. Doa Atas Persembahan
-- **Anchor**: Slide text containing `"DOA ATAS PERSEMBAHAN"` or `"ATAS PERSEMBAHAN"`.
-- **Overflow Handling**:
-  - **Slide 1**: Retains the top title header (`† DOA ATAS PERSEMBAHAN`), contains chunk 1 of prayer text, and strips closing response (`U. Amin`) if text spans multiple slides.
-  - **Slide 2+**: Strips top title header (`stripIntroParagraphs`), starts cleanly with overflowed prayer text, and appends `U. Amin` on the final chunk.
-
-### 12. Doa Sesudah Komuni
-
-- **Anchor**: activated by `hasPassedDoaKomuniTitle` (set when a slide
-  contains `"DOA SESUDAH KOMUNI"` or `"SESUDAH KOMUNI"`) combined with
-  not yet handled, OR the anchor text appearing directly on the
-  placeholder slide itself.
-- **Limit**: 280 chars.
-- **Overflow**: continuation slides get `stripIntroParagraphs` applied
-  only — **closing paragraphs are not stripped for this section**,
-  unlike Doa Kolekta and Doa Atas Persembahan. Confirm this is
-  intentional (e.g. the Komuni slide template has no separate closing
-  formula paragraph to worry about) rather than a gap, if you're
-  auditing this section.
-
----
-
-## 5. Known Limitations / Things to Watch
-
-- **Notes-slide targets are hardcoded filenames**, not resolved by
-  content — if the template's internal notes-part numbering ever
-  shifts (e.g. from editing the template in PowerPoint and it
-  renumbers notes parts), `notesSlide2/3/6.xml` may no longer
-  correspond to Bacaan Pertama/Kedua/Injil. Re-verify these three
-  numbers against the template directly after any template edit.
-- **The Mazmur fallback anchor is broad** (see §4.4) — it will absorb
-  any unexpected placeholder slide between Bacaan Pertama and Bacaan
-  Kedua, not only genuine psalm-verse slides.
-- **Character limits are untuned estimates**, not derived from the
-  template's actual text box dimensions or font metrics. Treat visible
-  overflow/underflow in generated slides as a signal to adjust the
-  relevant limit in code, not as a parsing bug.
-- **`updateNotesSlideXml` matches on `type="body"` appearing before
-  `<p:txBody>` in the shape's XML** — if a template edit changes the
-  attribute order on that placeholder tag, notes injection could
-  silently fail (no error, notes just won't update). Worth a quick
-  grep-check against the actual notes XML after any template change.
-
----
-
-## 6. Verification
-
-After any change to `pptxGenerator.ts`:
-
-```bash
-npm run build
-```
-
-This catches type errors but **not** structural/OpenXML correctness —
-after a build passes, actually open the generated `.pptx` in
-PowerPoint (not just a preview tool) to confirm it opens without a
-repair prompt and that duplicated slides/notes look correct, since
-relationship-integrity bugs (bad `rId`, missing `.rels` entry, etc.)
-are silent at the type-checker level.
+Use exact licensed fonts for full acceptance. Check source-text conservation and
+order, mixed fonts/sizes/symbols, rich intention typography, final responses,
+spacer-first fitting, long responses, notes-only scripture, and valid package
+relationships. Compare representative short/long OBS and English logical ZIP
+part contents before/after shared changes, not timestamp-sensitive ZIP bytes.
+Render weekly short/stress exports in Microsoft PowerPoint and inspect edited
+first/middle/final pages, icons, responses, spacing, and glyph bounds. Skia model
+bounds alone are not a claim of identical rendering in every Office viewer.

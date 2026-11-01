@@ -5,7 +5,7 @@ import test from "node:test";
 import JSZip from "jszip";
 import { XMLParser, XMLValidator } from "fast-xml-parser";
 import { Canvas, FontLibrary as fontLibrary } from "skia-canvas";
-import { createEnglishMassTextLayout } from "./englishMassTextLayout";
+import { createPptxTextLayout } from "./pptxTextLayout";
 
 const parse = new XMLParser({
   preserveOrder: true,
@@ -171,7 +171,7 @@ test(
   "English Mass uses exact shaped font geometry, not equal character counts",
   { skip: missingFonts },
   async () => {
-    const layout = await createEnglishMassTextLayout(new JSZip());
+    const layout = await createPptxTextLayout(new JSZip());
     const source = slide(paragraph("(teks)"), 310, 180);
     const narrow = "iiiiiiii ".repeat(12),
       wide = "WWWWWWWW ".repeat(12);
@@ -190,7 +190,7 @@ test(
   "English Mass preserves paragraphs and hard breaks without blank-line double charging",
   { skip: missingFonts },
   async () => {
-    const layout = await createEnglishMassTextLayout(new JSZip());
+    const layout = await createPptxTextLayout(new JSZip());
     const pages = layout.paginate(
       "slide1.xml",
       slide(
@@ -216,7 +216,7 @@ test(
   "English Mass shares one shape budget across multiple placeholders and responses",
   { skip: missingFonts },
   async () => {
-    const layout = await createEnglishMassTextLayout(new JSZip());
+    const layout = await createPptxTextLayout(new JSZip());
     const first = "First verse is measured. ".repeat(11).trim();
     const second = "The refrain must follow exactly once. ".repeat(6).trim();
     const source = slide(
@@ -239,7 +239,7 @@ test(
   "English Mass preserves split-run token prefix/suffix style and XML entities",
   { skip: missingFonts },
   async () => {
-    const layout = await createEnglishMassTextLayout(new JSZip());
+    const layout = await createPptxTextLayout(new JSZip());
     const source = slide(
       `<a:p><a:pPr/>${run("MC & <leader>: (")}${run("te", "Arial", 'i="1"')}${run("ks)")}${run(" — Amen & thanks", "Arial", 'i="1"')}</a:p>`,
       500,
@@ -269,7 +269,7 @@ test(
   "English Mass removes decorative title spacers and continues metadata before body",
   { skip: missingFonts },
   async () => {
-    const layout = await createEnglishMassTextLayout(new JSZip());
+    const layout = await createPptxTextLayout(new JSZip());
     const title = "The exact title and its rich epigraph ".repeat(10).trim();
     const citation = "Book of Wisdom chapter three";
     const source = slide(
@@ -310,7 +310,7 @@ test(
   "English Mass keeps first/last policies once and never repeats dialogue in the body",
   { skip: missingFonts },
   async () => {
-    const layout = await createEnglishMassTextLayout(new JSZip());
+    const layout = await createPptxTextLayout(new JSZip());
     const source = slide(
       paragraph("OPENING PRAYER") +
         paragraph("MC: Let us pray.") +
@@ -349,7 +349,7 @@ test(
   "English Mass empty/exact-fit input emits no unexpected blank pages",
   { skip: missingFonts },
   async () => {
-    const layout = await createEnglishMassTextLayout(new JSZip());
+    const layout = await createPptxTextLayout(new JSZip());
     const ctx = new Canvas(1, 1).getContext("2d");
     ctx.font = 'normal 700 48px "Arial"';
     const metrics = ctx.measureText("One line");
@@ -375,7 +375,7 @@ test(
   "English Mass oversized words split only at graphemes; no-break groups fail visibly",
   { skip: missingFonts },
   async () => {
-    const layout = await createEnglishMassTextLayout(new JSZip());
+    const layout = await createPptxTextLayout(new JSZip());
     const source = slide(paragraph("(teks)"), 180, 180);
     const word = "e\u0301".repeat(80);
     const pages = layout.paginate("slide1.xml", source, "teks", [word]);
@@ -407,7 +407,7 @@ test(
   "English Mass supports differing continuation geometry and independent touched shapes",
   { skip: missingFonts },
   async () => {
-    const layout = await createEnglishMassTextLayout(new JSZip());
+    const layout = await createPptxTextLayout(new JSZip());
     const source = slide(paragraph("(teks)"), 600, 180);
     const continuation = slide(paragraph("(teks)"), 350, 180);
     const body =
@@ -442,7 +442,7 @@ test(
         path.join(process.cwd(), "app/template/EM_Template.pptx"),
       ),
     );
-    const layout = await createEnglishMassTextLayout(zip);
+    const layout = await createPptxTextLayout(zip);
     const original = await zip.file("ppt/slides/slide14.xml")!.async("string");
     const title = "A measured song title & refrain ".repeat(15).trim();
     const pages = layout.paginate("slide14.xml", original, "judul", [title]);
@@ -470,7 +470,7 @@ test(
   "English Mass carries one tail line with the final response and preserves source hard breaks",
   { skip: missingFonts },
   async () => {
-    const layout = await createEnglishMassTextLayout(new JSZip());
+    const layout = await createPptxTextLayout(new JSZip());
     const ctx = new Canvas(1, 1).getContext("2d");
     ctx.font = 'normal 700 48px "Arial"';
     const metrics = ctx.measureText("Alpha");
@@ -553,7 +553,7 @@ test(
     );
     const source =
       '<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><p:cSld><p:spTree><p:sp><p:nvSpPr><p:nvPr><p:ph idx="1"/></p:nvPr></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>(teks)</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>';
-    const layout = await createEnglishMassTextLayout(zip);
+    const layout = await createPptxTextLayout(zip);
     const body = "Inherited exact typography and geometry. ".repeat(10).trim();
     const pages = layout.paginate("slide1.xml", source, "teks", [body]);
     assert.equal(visible(pages), body);
@@ -572,7 +572,7 @@ test(
   "template gaps survive while fitting and are reduced only as much as overflow requires",
   { skip: missingFonts },
   async () => {
-    const layout = await createEnglishMassTextLayout(new JSZip());
+    const layout = await createPptxTextLayout(new JSZip());
     const ctx = new Canvas(1, 1).getContext("2d");
     ctx.font = 'normal 700 48px "Arial"';
     const metrics = ctx.measureText("Alpha");
@@ -635,5 +635,161 @@ test(
       0,
     );
     validateGeometry(hardBreaks, 900, lineHeight * 4);
+  },
+);
+
+test("Indonesian font profile is exclusive and captured per layout instance", async () => {
+  const previous = process.env.INDONESIAN_MASS_FONT_DIR;
+  process.env.INDONESIAN_MASS_FONT_DIR = path.join(
+    process.cwd(),
+    "missing-indonesian-fonts",
+  );
+  let layout;
+  try {
+    layout = await createPptxTextLayout(new JSZip(), {
+      fontProfile: "indonesian",
+    });
+  } finally {
+    if (previous === undefined) delete process.env.INDONESIAN_MASS_FONT_DIR;
+    else process.env.INDONESIAN_MASS_FONT_DIR = previous;
+  }
+  assert.throws(
+    () =>
+      layout.paginate("slide1.xml", slide(paragraph("(teks)")), "teks", [
+        "Doa",
+      ]),
+    /Indonesian Mass.*INDONESIAN_MASS_FONT_DIR.*Font substitution is disabled/,
+  );
+});
+
+test(
+  "structured paragraphs retain token color, prefix, suffix and explicit face overrides",
+  { skip: missingFonts },
+  async () => {
+    const layout = await createPptxTextLayout(new JSZip(), {
+      fontProfile: "indonesian",
+    });
+    const source = slide(
+      `<a:p><a:pPr/>${run("MC: (teks) — selesai").replace("<a:latin", '<a:solidFill><a:srgbClr val="FF0000"/></a:solidFill><a:latin')}</a:p>`,
+      600,
+      220,
+    );
+    const body = "Isi doa yang harus lengkap. ".repeat(16).trim();
+    const pages = layout.paginate("slide1.xml", source, "teks", [
+      {
+        paragraphs: [
+          { text: "Judul", bold: true },
+          { text: body, bold: false },
+        ],
+      },
+    ]);
+    assert.equal(visible(pages), `MC: Judul${body} — selesai`);
+    assert.ok(pages.length > 1);
+    const runs = pages.flatMap((page) => find(parse.parse(page), "a:r"));
+    for (const entry of runs) {
+      const properties = find([entry], "a:rPr")[0];
+      assert.equal(
+        (find([properties], "a:srgbClr")[0][":@"] as Record<string, string>)[
+          "@_val"
+        ],
+        "FF0000",
+      );
+      if (content(entry).includes("Isi")) {
+        assert.equal((properties[":@"] as Record<string, string>)["@_b"], "0");
+      }
+    }
+    assert.equal(visible(pages).split("MC: ").length - 1, 1);
+  },
+);
+
+test(
+  "dynamic final response shares a final budget or spans ordered pages without loss",
+  { skip: missingFonts },
+  async () => {
+    const layout = await createPptxTextLayout(new JSZip(), {
+      fontProfile: "indonesian",
+    });
+    const source = slide(
+      paragraph("(teks)") +
+        paragraph("(teks)").replace(
+          "<a:latin",
+          '<a:solidFill><a:srgbClr val="00AA00"/></a:solidFill><a:latin',
+        ),
+      500,
+      200,
+    );
+    const body = "Intensi umat. ".repeat(25).trim();
+    for (const response of [
+      "U\tKabulkanlah doa kami.",
+      "U\t" + "Jawaban umat lengkap. ".repeat(45).trim(),
+    ]) {
+      const pages = layout.paginate("slide1.xml", source, "teks", [
+        { paragraphs: [{ text: body, bold: false }] },
+        {
+          paragraphs: [{ text: response, bold: false, italic: true }],
+          policy: "last",
+        },
+      ]);
+      assert.equal(visible(pages), body + response);
+      const responseRuns = pages
+        .flatMap((page) => find(parse.parse(page), "a:r"))
+        .filter((entry) => find([entry], "a:srgbClr").length);
+      for (const entry of responseRuns) {
+        const attributes = find([entry], "a:rPr")[0][":@"] as Record<
+          string,
+          string
+        >;
+        assert.equal(attributes["@_i"], "1");
+        assert.equal(attributes["@_b"], "0");
+      }
+      pages.forEach((page) => assert.equal(XMLValidator.validate(page), true));
+    }
+  },
+);
+
+const indonesianDirs = process.env.INDONESIAN_MASS_FONT_DIR
+  ? [process.env.INDONESIAN_MASS_FONT_DIR]
+  : [
+      path.join(process.cwd(), "app/fonts/indonesian-mass"),
+      "/Applications/Microsoft PowerPoint.app/Contents/Resources/DFonts",
+      "/System/Library/Fonts/Supplemental",
+    ];
+const missingWeeklyFaces = [
+  "Arial Narrow Bold.ttf",
+  "Wingdings.ttf",
+  "Lucida Sans Demibold Italic.ttf",
+  "Arial.ttf",
+  "Arial Bold.ttf",
+].some(
+  (name) => !indonesianDirs.some((dir) => fs.existsSync(path.join(dir, name))),
+);
+test(
+  "weekly metadata measures symbol-only Wingdings and mixed 60/48/44pt exact faces",
+  { skip: missingWeeklyFaces ? "Requires licensed weekly font faces" : false },
+  async () => {
+    const layout = await createPptxTextLayout(new JSZip(), {
+      fontProfile: "indonesian",
+    });
+    const source = slide(
+      '<a:p><a:pPr/><a:r><a:rPr sz="6000"><a:sym typeface="Wingdings"/></a:rPr><a:t>\uF026</a:t></a:r>' +
+        run(" (teks)", "Arial Narrow").replace('sz="4800"', 'sz="6000"') +
+        "</a:p>" +
+        paragraph("Epigraf", "", "Lucida Sans", 'i="1"') +
+        paragraph("hening").replace('sz="4800"', 'sz="4400"'),
+      960,
+      540,
+    );
+    const pages = layout.paginate("slide35.xml", source, "teks", [
+      "Bacaan dari Kitab Kebijaksanaan",
+    ]);
+    assert.equal(pages.length, 1);
+    assert.equal(
+      visible(pages),
+      "\uF026 Bacaan dari Kitab KebijaksanaanEpigrafhening",
+    );
+    assert.match(pages[0], /a:sym typeface="Wingdings"/);
+    for (const size of ["6000", "4800", "4400"])
+      assert.ok(pages[0].includes(`sz="${size}"`));
+    assert.equal(XMLValidator.validate(pages[0]), true);
   },
 );

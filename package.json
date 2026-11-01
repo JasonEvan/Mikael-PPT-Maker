@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:english": "tsx --test app/services/englishMass*.test.ts"
+    "test:english": "tsx --test app/services/englishMassPptxGenerator.test.ts app/services/pptxTextLayout.test.ts",
+    "test:indonesian": "tsx --test app/services/pptxGenerator.test.ts app/services/pptxTextLayout.test.ts",
+    "test:pptx": "tsx --test app/services/*.test.ts"
   },
   "dependencies": {
     "@types/word-extractor": "^1.0.6",

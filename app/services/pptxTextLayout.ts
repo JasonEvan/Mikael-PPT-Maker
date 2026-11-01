@@ -114,15 +114,18 @@ const fontNames: Record<string, string[]> = {
     "ArialRoundedMTBold.ttf",
     "Arial Rounded Bold.ttf",
   ],
+  "Arial Narrow|400|normal": ["Arial Narrow.ttf"],
+  "Arial Narrow|700|normal": ["Arial Narrow Bold.ttf"],
+  "Arial Narrow|400|italic": ["Arial Narrow Italic.ttf"],
+  "Arial Narrow|700|italic": ["Arial Narrow Bold Italic.ttf"],
+  "Lucida Sans|700|italic": ["Lucida Sans Demibold Italic.ttf"],
+  "Wingdings|400|normal": ["Wingdings.ttf"],
 };
-const registeredFonts = new Map<
-  string,
-  { alias: string; weight: number; style: string }
->();
-function fontDirectories(): string[] {
-  if (process.env.ENGLISH_MASS_FONT_DIR)
-    return [path.resolve(process.env.ENGLISH_MASS_FONT_DIR)];
-  const provisioned = path.join(process.cwd(), "app/fonts/english-mass");
+type FontFace = { alias: string; weight: number; style: string };
+function fontDirectories(profile: "english" | "indonesian"): string[] {
+  const override = process.env[`${profile.toUpperCase()}_MASS_FONT_DIR`];
+  if (override) return [path.resolve(override)];
+  const provisioned = path.join(process.cwd(), `app/fonts/${profile}-mass`);
   return [
     provisioned,
     "/Applications/Microsoft PowerPoint.app/Contents/Resources/DFonts",
@@ -132,9 +135,15 @@ function fontDirectories(): string[] {
     path.join(process.env.HOME ?? "", "Library/Fonts"),
   ];
 }
-function exactFont(family: string, bold: boolean, italic: boolean) {
+function exactFont(
+  family: string,
+  bold: boolean,
+  italic: boolean,
+  profile: "english" | "indonesian",
+  dirs: string[],
+  registeredFonts: Map<string, FontFace>,
+) {
   const key = `${family}|${bold ? 700 : 400}|${italic ? "italic" : "normal"}`;
-  const dirs = fontDirectories();
   const cacheKey = `${dirs.join(";")}|${key}`;
   const cached = registeredFonts.get(cacheKey);
   if (cached) return cached;
@@ -144,7 +153,7 @@ function exactFont(family: string, bold: boolean, italic: boolean) {
     .find((candidate) => fs.existsSync(candidate));
   if (!file)
     throw new Error(
-      `English Mass layout requires the exact licensed ${family} ${bold ? "bold" : "regular"}${italic ? " italic" : ""} font. Set ENGLISH_MASS_FONT_DIR to a directory containing ${candidates.join(" or ") || "this exact font face"}. Searched: ${dirs.join(", ")}. Font substitution is disabled.`,
+      `${profile === "english" ? "English" : "Indonesian"} Mass layout requires the exact licensed ${family} ${bold ? "bold" : "regular"}${italic ? " italic" : ""} font. Set ${profile.toUpperCase()}_MASS_FONT_DIR to a directory containing ${candidates.join(" or ") || "this exact font face"}. Searched: ${dirs.join(", ")}. Font substitution is disabled.`,
     );
   // Register the physical face explicitly; verify its internal family/style rather
   // than trusting a filename or allowing Canvas to synthesize a missing face.
@@ -154,11 +163,12 @@ function exactFont(family: string, bold: boolean, italic: boolean) {
       candidate.family === family &&
       candidate.style === (italic ? "italic" : "normal") &&
       (family === "Arial Rounded MT Bold" ||
-        candidate.weight === (bold ? 700 : 400)),
+        candidate.weight ===
+          (family === "Lucida Sans" && bold ? 600 : bold ? 700 : 400)),
   );
   if (!face)
     throw new Error(
-      `English Mass font ${file} does not contain the required ${key} face; provision the exact licensed font, not a renamed substitute.`,
+      `${profile === "english" ? "English" : "Indonesian"} Mass font ${file} does not contain the required ${key} face; provision the exact licensed font, not a renamed substitute.`,
     );
   const result = { alias: family, weight: face.weight, style: face.style };
   registeredFonts.set(cacheKey, result);
@@ -171,6 +181,7 @@ type Paragraph = {
   end?: Xml;
   spans: Span[];
   policy: "flow" | "first" | "last";
+  dynamicLast?: boolean;
 };
 type Geometry = { width: number; height: number; body: Xml };
 type Line = {
@@ -184,12 +195,18 @@ type Line = {
   from: number;
 };
 type Shape = { raw: string; node: Xml; index: number };
-export interface EnglishMassTextLayout {
+export type PptxTextReplacement =
+  | string
+  | {
+      paragraphs: readonly { text: string; bold?: boolean; italic?: boolean }[];
+      policy?: "flow" | "last";
+    };
+export interface PptxTextLayout {
   paginate(
     slideFileName: string,
     slideXml: string,
     token: string,
-    replacements: readonly string[],
+    replacements: readonly PptxTextReplacement[],
     options?: {
       continuationXml?: string;
       firstOnlyTexts?: readonly string[];
@@ -233,9 +250,13 @@ function placeholder(token: string): RegExp {
   );
 }
 
-export async function createEnglishMassTextLayout(
+export async function createPptxTextLayout(
   zip: JSZip,
-): Promise<EnglishMassTextLayout> {
+  options: { fontProfile?: "english" | "indonesian" } = {},
+): Promise<PptxTextLayout> {
+  const profile = options.fontProfile ?? "english";
+  const dirs = fontDirectories(profile);
+  const registeredFonts = new Map<string, FontFace>();
   const documents = new Map<string, Xml[]>();
   await Promise.all(
     Object.values(zip.files)
@@ -381,7 +402,13 @@ export async function createEnglishMassTextLayout(
             element("a:latin", [], { typeface: resolved }),
           );
       }
-      if (!attr(child(result, "a:latin"), "typeface") || !attr(result, "sz"))
+      if (
+        !(
+          attr(child(result, "a:sym"), "typeface") ||
+          attr(child(result, "a:latin"), "typeface")
+        ) ||
+        !attr(result, "sz")
+      )
         throw new Error(
           `${file}: a dynamic paragraph has no font family/size in its template style hierarchy.`,
         );
@@ -417,11 +444,15 @@ export async function createEnglishMassTextLayout(
     };
   }
   function style(properties: Xml) {
-    const family = attr(child(properties, "a:latin"), "typeface")!;
+    const family = (attr(child(properties, "a:sym"), "typeface") ||
+      attr(child(properties, "a:latin"), "typeface"))!;
     const font = exactFont(
       family,
       attr(properties, "b") === "1" || attr(properties, "b") === "true",
       attr(properties, "i") === "1" || attr(properties, "i") === "true",
+      profile,
+      dirs,
+      registeredFonts,
     );
     ctx.font = `${font.style} ${font.weight} ${Number(attr(properties, "sz")) / 100}px "${font.alias}"`;
     ctx.letterSpacing = `${Number(attr(properties, "spc") ?? 0) / 100}px`;
@@ -742,6 +773,69 @@ export async function createEnglishMassTextLayout(
             flow.push(paragraphModel);
             continue;
           }
+          if (
+            matches.some(
+              (_, index) =>
+                typeof replacements[replacementIndex + index] === "object",
+            )
+          ) {
+            let current: Paragraph = { ...paragraphModel, spans: [] };
+            let offset = 0;
+            const flush = () => {
+              if (current.spans.length) flow.push(current);
+              current = { ...paragraphModel, spans: [] };
+            };
+            for (const match of matches) {
+              const start = match.index!;
+              current.spans.push(
+                ...slices(paragraphModel.spans, offset, start),
+              );
+              const base =
+                slices(paragraphModel.spans, start, start + 1)[0]?.properties ??
+                paragraphModel.spans[0].properties;
+              const replacement = replacements[replacementIndex++] ?? "";
+              if (typeof replacement === "string") {
+                current.spans.push({
+                  value: normalize(replacement),
+                  properties: base,
+                });
+              } else {
+                replacement.paragraphs.forEach((part, index) => {
+                  if (index) flush();
+                  current.policy = replacement.policy ?? "flow";
+                  current.dynamicLast = replacement.policy === "last";
+                  const properties = clone(base);
+                  if (part.bold !== undefined)
+                    attrs(properties)["@_b"] = part.bold ? "1" : "0";
+                  if (part.italic !== undefined)
+                    attrs(properties)["@_i"] = part.italic ? "1" : "0";
+                  // Structured content can carry semantic speaker tab stops;
+                  // retain those without changing legacy string normalization.
+                  const parts = part.text
+                    .split("\t")
+                    .map(normalize)
+                    .join("\t")
+                    .split("\n\n");
+                  parts.forEach((value, partIndex) => {
+                    if (partIndex) {
+                      const policy = current.policy;
+                      const dynamicLast = current.dynamicLast;
+                      flush();
+                      current.policy = policy;
+                      current.dynamicLast = dynamicLast;
+                    }
+                    current.spans.push({ value, properties });
+                  });
+                });
+              }
+              offset = start + match[0].length;
+            }
+            current.spans.push(
+              ...slices(paragraphModel.spans, offset, sourceText.length),
+            );
+            flush();
+            continue;
+          }
           const replaced: Span[] = [];
           let offset = 0;
           for (const match of matches) {
@@ -751,7 +845,9 @@ export async function createEnglishMassTextLayout(
               slices(paragraphModel.spans, start, start + 1)[0]?.properties ??
               paragraphModel.spans[0].properties;
             replaced.push({
-              value: normalize(replacements[replacementIndex++] ?? ""),
+              value: normalize(
+                (replacements[replacementIndex++] as string) ?? "",
+              ),
               properties: replacementStyle,
             });
             offset = start + match[0].length;
@@ -822,6 +918,22 @@ export async function createEnglishMassTextLayout(
             flow.splice(index, 1);
           }
         }
+        const dynamicFooters = flow.filter((p) => p.dynamicLast);
+        const dynamicFooterHeight = dynamicFooters.reduce(
+          (sum, p) =>
+            sum +
+            lines(p, nextBox).reduce((height, line) => height + cost(line), 0),
+          0,
+        );
+        if (dynamicFooterHeight > nextBox.height + 0.001) {
+          // An oversized response is ordered content, not an indivisible static
+          // footer. Reuse normal paragraph pagination after the complete body.
+          for (const p of dynamicFooters) {
+            flow.splice(flow.indexOf(p), 1);
+            p.policy = "flow";
+          }
+          flow.push(...dynamicFooters);
+        }
         const pages: Line[][] = [];
         // Each shape has one shared height budget, including every placeholder,
         // fixed heading, response, paragraph gap and first/last-only paragraph.
@@ -890,7 +1002,10 @@ export async function createEnglishMassTextLayout(
           if (consumed) pending = pending.slice(consumed);
           const footers = last.flatMap((p) => lines(p, box));
           const footerCost = footers.reduce((sum, line) => sum + cost(line), 0);
-          if (footerCost > box.height + 0.001)
+          if (
+            footerCost > box.height + 0.001 &&
+            last.some((p) => !p.dynamicLast)
+          )
             throw new Error(
               `${file}: last-only static text exceeds the entire shape capacity.`,
             );

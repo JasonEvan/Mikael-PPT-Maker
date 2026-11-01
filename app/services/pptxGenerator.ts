@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import JSZip from "jszip";
 import { MappedLiturgyData } from "../utils/docxParser";
+import { createPptxTextLayout, PptxTextReplacement } from "./pptxTextLayout";
 
 // ponytail: helper to escape XML special characters
 function escapeXml(str: string): string {
@@ -19,13 +20,8 @@ function formatEpigraph(epigraph?: string): string {
   if (!epigraph || !epigraph.trim()) return "";
   let cleaned = epigraph.trim();
 
-  while (
-    /^[*\s"“'”‘’`«»]/.test(cleaned) ||
-    /[*\s"“'”‘’`«»]$/.test(cleaned)
-  ) {
-    cleaned = cleaned
-      .replace(/^[*\s"“'”‘’`«»]+|[*\s"“'”‘’`«»]+$/g, "")
-      .trim();
+  while (/^[*\s"“'”‘’`«»]/.test(cleaned) || /[*\s"“'”‘’`«»]$/.test(cleaned)) {
+    cleaned = cleaned.replace(/^[*\s"“'”‘’`«»]+|[*\s"“'”‘’`«»]+$/g, "").trim();
   }
 
   if (!cleaned) return "";
@@ -413,17 +409,35 @@ export async function generatePPTXBufferForTemplate(
   templateFileName: string,
   options: PptxGeneratorOptions = {},
 ): Promise<Buffer> {
+  return generatePPTXBufferForTemplateInternal(
+    mappedData,
+    templateFileName,
+    options,
+  );
+}
+
+async function generatePPTXBufferForTemplateInternal(
+  mappedData: MappedLiturgyData,
+  templateFileName: string,
+  options: PptxGeneratorOptions = {},
+  measuredWeekly = false,
+): Promise<Buffer> {
   const templatePath = path.join(
     process.cwd(),
     "app/template",
     templateFileName,
   );
   if (!fs.existsSync(templatePath)) {
-    throw new Error(`Template PowerPoint (${templateFileName}) tidak ditemukan.`);
+    throw new Error(
+      `Template PowerPoint (${templateFileName}) tidak ditemukan.`,
+    );
   }
 
   const templateBuffer = await fs.promises.readFile(templatePath);
   const zip = await JSZip.loadAsync(templateBuffer);
+  const textLayout = measuredWeekly
+    ? await createPptxTextLayout(zip, { fontProfile: "indonesian" })
+    : undefined;
 
   // 1. Read presentation structure and slide mapping
   const presentationXml = await zip.file("ppt/presentation.xml")?.async("text");
@@ -677,6 +691,172 @@ export async function generatePPTXBufferForTemplate(
     ) {
       continue;
     }
+    if (textLayout) {
+      let sequences: PptxTextReplacement[][] | undefined;
+      let notesText = "";
+
+      if (slideTextUpper.includes("KASIHANILAH KAMI")) {
+        const idx =
+          seruanCount < (mappedData.seruanTobat?.length || 0) ? seruanCount : 0;
+        sequences = [[mappedData.seruanTobat?.[idx] || ""]];
+        seruanCount++;
+      } else if (
+        slideTextUpper.includes("MARILAH KITA BERDOA") &&
+        !hasPassedBacaanPertama
+      ) {
+        sequences = [[mappedData.doaKolekta || ""]];
+      } else if (
+        slideTextUpper.includes("BACAAN PERTAMA") ||
+        slideTextUpper.includes("BACAAN I ")
+      ) {
+        sequences = [
+          [
+            formatEpigraph(mappedData.bacaanPertama?.epigraph),
+            cleanCitation(mappedData.bacaanPertama?.citation),
+          ],
+        ];
+        notesText = mappedData.bacaanPertama?.notesBody || "";
+      } else if (
+        (slideTextUpper.includes("MAZMUR") ||
+          slideTextUpper.includes("TANGGAPAN") ||
+          (hasPassedBacaanPertama && !hasPassedBacaanKedua)) &&
+        !hasHandledMazmur &&
+        !slideTextUpper.includes("BACAAN KEDUA") &&
+        !slideTextUpper.includes("BACAAN PERTAMA")
+      ) {
+        // A verse is a separate sequence, even when another verse would fit.
+        sequences = (mappedData.mazmurTanggapan?.verses || []).map((verse) => [
+          verse,
+        ]);
+        hasHandledMazmur = true;
+      } else if (
+        slideTextUpper.includes("BACAAN KEDUA") ||
+        slideTextUpper.includes("BACAAN II ")
+      ) {
+        sequences = [
+          [
+            formatEpigraph(mappedData.bacaanKedua?.epigraph),
+            cleanCitation(mappedData.bacaanKedua?.citation),
+          ],
+        ];
+        notesText = mappedData.bacaanKedua?.notesBody || "";
+      } else if (slideTextUpper.includes("INILAH INJIL SUCI MENURUT")) {
+        sequences = [[mappedData.bacaanInjil?.gospelName || ""]];
+      } else if (
+        slideTextUpper.includes("INJIL") &&
+        !slideTextUpper.includes("PENGANTAR")
+      ) {
+        sequences = [
+          [
+            formatEpigraph(mappedData.bacaanInjil?.epigraph),
+            cleanGospelCitation(mappedData.bacaanInjil?.citation),
+          ],
+        ];
+        notesText = mappedData.bacaanInjil?.notesBody || "";
+      } else if (hasPassedDoaUmatTitle && !hasHandledDoaUmatIntro) {
+        if (getPlaceholderCount(slideXml) === 1) {
+          sequences = [[mappedData.doaUmat?.intro || ""]];
+          hasHandledDoaUmatIntro = true;
+        }
+      } else if (
+        hasPassedDoaUmatTitle &&
+        hasHandledDoaUmatIntro &&
+        !hasHandledDoaUmatIntentions
+      ) {
+        if (getPlaceholderCount(slideXml) >= 2) {
+          const intentions = mappedData.doaUmat?.intentions || [];
+          sequences = intentions.length
+            ? intentions.map<PptxTextReplacement[]>((item) => [
+                {
+                  paragraphs: [
+                    ...(item.title ? [{ text: item.title, bold: true }] : []),
+                    ...(item.body ? [{ text: item.body, bold: false }] : []),
+                  ],
+                },
+                {
+                  paragraphs: item.response
+                    ? [{ text: `U\t${item.response}` }]
+                    : [],
+                  policy: "last",
+                },
+              ])
+            : [["", ""]];
+          hasHandledDoaUmatIntentions = true;
+        }
+      } else if (
+        hasPassedDoaUmatTitle &&
+        hasHandledDoaUmatIntentions &&
+        !hasHandledDoaUmatOutro
+      ) {
+        sequences = [[mappedData.doaUmat?.closing || ""]];
+        hasHandledDoaUmatOutro = true;
+        hasPassedDoaUmatTitle = false;
+      } else if (
+        slideTextUpper.includes("DOA ATAS PERSEMBAHAN") ||
+        slideTextUpper.includes("ATAS PERSEMBAHAN")
+      ) {
+        sequences = [[mappedData.doaAtasPersembahan || ""]];
+      } else if (
+        (hasPassedDoaKomuniTitle && !hasHandledDoaKomuni) ||
+        slideTextUpper.includes("DOA SESUDAH KOMUNI") ||
+        slideTextUpper.includes("SESUDAH KOMUNI")
+      ) {
+        sequences = [[mappedData.doaSesudahKomuni || ""]];
+        hasHandledDoaKomuni = true;
+        hasPassedDoaKomuniTitle = false;
+      }
+
+      if (sequences?.length) {
+        // Fixed prompts and responses share the measured shape budget with
+        // its tokens. Keep their exact template text/style, once at each end.
+        const paragraphTexts = pMatches.map((paragraph) =>
+          (paragraph.match(/<a:t[^>]*>(.*?)<\/a:t>/g) || [])
+            .map((run) => run.replace(/<[^>]+>/g, ""))
+            .join(""),
+        );
+        const firstToken = paragraphTexts.findIndex((text) =>
+          /\(\s*teks\s*\)/i.test(text),
+        );
+        const lastToken = paragraphTexts.reduce(
+          (last, text, index) => (/\(\s*teks\s*\)/i.test(text) ? index : last),
+          -1,
+        );
+        const firstOnlyTexts = paragraphTexts
+          .slice(0, firstToken)
+          .filter((text) => text.trim());
+        const lastOnlyTexts = paragraphTexts
+          .slice(lastToken + 1)
+          .filter((text) => text.trim());
+        let wroteFirstPage = false;
+        let lastRId = slide.rId;
+        for (const replacements of sequences) {
+          const pages = textLayout.paginate(
+            slide.fileName,
+            slideXml,
+            "teks",
+            replacements,
+            { firstOnlyTexts, lastOnlyTexts, preserveTemplateSpacers: true },
+          );
+          for (const pageXml of pages) {
+            if (!wroteFirstPage) {
+              zip.file(slide.fileName, pageXml);
+              wroteFirstPage = true;
+            } else {
+              const duplicate = await duplicateSlide(
+                slide.fileName,
+                lastRId,
+                pageXml,
+              );
+              lastRId = duplicate.newRId;
+            }
+          }
+        }
+        await updateSlideNotes(slide.fileName, notesText);
+      }
+      // Weekly pages are already final XML; never run legacy substitution or
+      // character-based chunking over the measured output.
+      continue;
+    }
 
     // 1. OBS Hijau Seruan Tobat invocation slides. Their placeholders have no
     // identifying text, so fill the first three placeholders after the title.
@@ -754,7 +934,10 @@ export async function generatePPTXBufferForTemplate(
       slideXml = replacePlaceholdersInXml(slideXml, [epigraph, citation]);
       zip.file(slide.fileName, slideXml);
 
-      await updateSlideNotes(slide.fileName, mappedData.bacaanPertama?.notesBody || "");
+      await updateSlideNotes(
+        slide.fileName,
+        mappedData.bacaanPertama?.notesBody || "",
+      );
     }
 
     // 4. Mazmur Tanggapan Content Slide (duplication for all verses sequentially)
@@ -805,7 +988,10 @@ export async function generatePPTXBufferForTemplate(
       slideXml = replacePlaceholdersInXml(slideXml, [epigraph, citation]);
       zip.file(slide.fileName, slideXml);
 
-      await updateSlideNotes(slide.fileName, mappedData.bacaanKedua?.notesBody || "");
+      await updateSlideNotes(
+        slide.fileName,
+        mappedData.bacaanKedua?.notesBody || "",
+      );
     }
 
     // 6. Bacaan Injil - Gospel Citation Intro Slide
@@ -831,7 +1017,10 @@ export async function generatePPTXBufferForTemplate(
       slideXml = replacePlaceholdersInXml(slideXml, [epigraph, citation]);
       zip.file(slide.fileName, slideXml);
 
-      await updateSlideNotes(slide.fileName, mappedData.bacaanInjil?.notesBody || "");
+      await updateSlideNotes(
+        slide.fileName,
+        mappedData.bacaanInjil?.notesBody || "",
+      );
       hasPendingInjilContent = false;
     }
 
@@ -879,7 +1068,9 @@ export async function generatePPTXBufferForTemplate(
         const originalSlideXml = slideXml;
         const intentions = mappedData.doaUmat?.intentions || [];
         const intentionChunks = intentions.flatMap((item) => {
-          const intentionText = [item.title, item.body].filter(Boolean).join("\n");
+          const intentionText = [item.title, item.body]
+            .filter(Boolean)
+            .join("\n");
           const chunks = splitTextIntoSlideChunks(
             intentionText,
             options.doaUmatIntentionMaxChars ?? 260,
@@ -1065,9 +1256,10 @@ export async function generatePPTXBufferForTemplate(
           const continuationSlideXml = isLast
             ? originalSlideXml
             : stripClosingParagraphs(originalSlideXml);
-          const filledChunkXml = replacePlaceholdersInXml(continuationSlideXml, [
-            outroChunks[i],
-          ]);
+          const filledChunkXml = replacePlaceholdersInXml(
+            continuationSlideXml,
+            [outroChunks[i]],
+          );
           const { newRId } = await duplicateSlide(
             slide.fileName,
             lastRId,
@@ -1182,5 +1374,10 @@ export async function generatePPTXBufferForTemplate(
 export function generatePPTXBuffer(
   mappedData: MappedLiturgyData,
 ): Promise<Buffer> {
-  return generatePPTXBufferForTemplate(mappedData, "Template_Mingguan.pptx");
+  return generatePPTXBufferForTemplateInternal(
+    mappedData,
+    "Template_Mingguan.pptx",
+    {},
+    true,
+  );
 }

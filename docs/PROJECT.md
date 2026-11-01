@@ -69,10 +69,10 @@ Raja-raja 19:9a.11-13a**`
 
 ## Target document: the PPTX template
 
-The PPTX template is a **fixed 117-slide deck** that already contains
-the full Mass running order, correct fonts, layout, and styling. It is
-not a small set of reusable "master" slides — it is the actual full
-deck, week after week, where only specific text placeholders change.
+`Template_Mingguan.pptx` currently contains **112 slides**, with the full
+Mass running order, fonts, layout, and styling. It is not a small set of
+reusable master slides: the generator edits selected placeholders and adds
+continuations to the existing deck. Matching never depends on these ordinals.
 
 - Editable placeholders are literally the text `( teks )` typed inside a
   text box on the slide, in the position/style where the real content
@@ -103,26 +103,26 @@ deck, week after week, where only specific text placeholders change.
 
 ## Known placeholder-to-slide mapping (MVP scope)
 
-| Content                                                 | Slide #            | Mode                                      |
-| ------------------------------------------------------- | ------------------ | ----------------------------------------- |
-| Seruan Tobat (3 lines)                                  | 22, 23, 24         | Fill if present, else leave blank         |
-| Doa Kolekta                                             | 33                 | Simple fill                               |
-| Bacaan Pertama — epigraph quote                         | 35 (placeholder 1) | Simple fill                               |
-| Bacaan Pertama — source citation                        | 35 (placeholder 2) | Simple fill                               |
-| Bacaan Pertama — full body                              | notes on slide 35  | Simple fill (notes)                       |
-| Mazmur Tanggapan verses                                 | 39, 41, 43         | One slide per verse found (2-3 typical)   |
-| Bacaan Kedua — epigraph / citation / body               | 46 (+ notes)       | Same pattern as Bacaan Pertama            |
-| Bacaan Injil — Gospel citation (e.g. "Matius 14:22-33") | 50                 | Simple fill                               |
-| Bacaan Injil — epigraph / citation / body               | 51 (+ notes)       | Same pattern as Bacaan Pertama            |
-| Doa Umat — intro line                                   | 68                 | Simple fill                               |
-| Doa Umat — each intention (title + body)                | 69                 | **Duplicate per intention** (3-5 typical) |
-| Doa Umat — closing line                                 | 71                 | Simple fill                               |
-| Doa Atas Persembahan                                    | 77                 | Simple fill                               |
-| Doa Sesudah Komuni                                      | 97                 | Simple fill                               |
+| Content                                             | Slide #            | Mode                                       |
+| --------------------------------------------------- | ------------------ | ------------------------------------------ |
+| Seruan Tobat (3 lines)                              | 22, 23, 24         | Measured invocation and fixed responses    |
+| Doa Kolekta                                         | 33                 | Measured prayer, final response            |
+| Bacaan Pertama — epigraph quote                     | 35 (placeholder 1) | Shared measured metadata budget            |
+| Bacaan Pertama — source citation                    | 35 (placeholder 2) | Shared measured metadata budget            |
+| Bacaan Pertama — full body                          | notes on slide 35  | Simple fill (notes)                        |
+| Mazmur Tanggapan verses                             | 39                 | Separate measured page sequence per verse  |
+| Bacaan Kedua — epigraph / citation / body           | 41 (+ notes)       | Same pattern as Bacaan Pertama             |
+| Bacaan Injil — Gospel-name introduction             | 45                 | Measured dialogue/source introduction      |
+| Bacaan Injil — epigraph / citation / body           | 46 (+ notes)       | Metadata visible; body only in notes       |
+| Doa Umat — intro line                               | 63                 | Measured pagination                        |
+| Doa Umat — each intention (title + body + response) | 64                 | Separate measured sequence per intention   |
+| Doa Umat — closing line                             | 66                 | Fixed response only after complete closing |
+| Doa Atas Persembahan                                | 72                 | Measured pagination, final response        |
+| Doa Sesudah Komuni                                  | 92                 | Measured pagination                        |
 
-Out of scope for MVP (must NOT be touched by the app): song lyrics
-(slides 74, 95, 117), musical notation, church announcements (slides
-102-112).
+Out of scope: song lyrics, fixed musical notation, and church announcements.
+These parts are not globally filled or restyled. See `docs/PPTX_MAPPING.md`
+for anchor-based weekly and OBS rules.
 
 ## Tech stack
 
@@ -172,11 +172,11 @@ missing sections should be visibly flagged in the preview, not hidden.
 
 ## English Mass: measured text layout
 
-- All English dynamic text destinations use `englishMassTextLayout.ts`:
+- All English dynamic text destinations use the shared `pptxTextLayout.ts`:
   song titles, reading introductions/bodies, psalm verses/refrains, acclamation,
   prayers, intercessions, Kyrie, and homily. There are no character-budget
-  pagination limits in this English export path. Indonesian/OBS generators are
-  intentionally unchanged.
+  pagination limits in this English export path. Indonesian weekly now also
+  uses measured layout; OBS Hijau/Kuning deliberately retain legacy pagination.
 - Layout is measured with Skia Canvas and the exact template fonts. The engine
   resolves text-box extents/insets and inherited paragraph/run properties,
   budgets all paragraphs sharing a shape together, and fills pages with measured
@@ -233,3 +233,34 @@ Model bounds are not a claim of identical rendering across Office applications.
 Validate representative generated decks in Microsoft PowerPoint after template
 or typography changes, including First Reading introductions/bodies and homily
 first/middle/final pages.
+
+## Indonesian weekly: measured layout
+
+- `generatePPTXBuffer` selects measured Indonesian layout in the existing
+  generator. The public template entry point used by OBS retains the legacy
+  mode; the API, parser, UI, and OBS wrappers are unchanged.
+- Every existing weekly dynamic role is measured, including previously
+  unbounded Seruan Tobat, reading metadata, Gospel-name dialogue, and psalm
+  verses. Legacy character budgets and combined-response thresholds do not
+  participate in weekly layout decisions.
+- Complete Bacaan I/II/Injil bodies remain only in the original metadata
+  slide's speaker notes, resolved through its notes relationship. Metadata
+  continuations do not share that notes part.
+- Template spacers are preserved until the edited shape overflows. Heading,
+  epigraph, citation, static prompts, and responses share one actual shape
+  budget; source paragraphs/hard breaks are never discarded as spacers.
+- Structured intentions preserve a bold title, regular body, and the original
+  colored/italic response with its `U` tab label. Each verse/intention has its
+  own ordered page sequence. A fitting response goes last; an oversized response
+  continues after its body without truncation or font shrinking.
+- Exact weekly fonts include Arial, Arial Narrow, Lucida Sans demibold italic
+  (physical weight600), and Wingdings for the existing book icon. Symbol-only
+  runs are measured using `a:sym`, not a Latin theme font.
+- Set `INDONESIAN_MASS_FONT_DIR` to an exclusive directory of licensed exact
+  faces, or provision `app/fonts/indonesian-mass` / standard macOS Office fonts.
+  Next traces that font folder alongside the English folder. Fonts are not
+  redistributed or embedded; presentation computers need the same faces.
+- Run `npm run test:pptx` for all generator/shared-engine regressions, or
+  `npm run test:indonesian` for weekly/OBS plus shared layout. Full acceptance
+  requires both English and weekly fonts, logical ZIP-part equivalence for
+  unchanged OBS/English scenarios, and Microsoft PowerPoint render inspection.
