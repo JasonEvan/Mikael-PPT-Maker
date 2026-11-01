@@ -699,3 +699,88 @@ test("weekly metadata measures symbol-only Wingdings and mixed 60/48/44pt exact 
     assert.ok(pages[0].includes(`sz="${size}"`));
   assert.equal(XMLValidator.validate(pages[0]), true);
 });
+
+test("inline runs normalize seams together and retain hard breaks, tabs and surrounding template text", async () => {
+  const layout = await createPptxTextLayout(new JSZip());
+  const source = slide(paragraph("MC: (teks) — selesai"), 1800, 500);
+  const pages = layout.paginate("slide1.xml", source, "teks", [
+    {
+      paragraphs: [
+        {
+          bold: false,
+          runs: [
+            { text: "", bold: true },
+            { text: "  Gereja.", bold: true },
+            { text: "  " },
+            { text: " Semoga\r", italic: true },
+            { text: "\nberkat\tAllah\n" },
+            { text: "\nmenyertai.  " },
+          ],
+        },
+      ],
+    },
+  ]);
+  assert.equal(
+    visible(pages),
+    "MC: Gereja. Semogaberkat\tAllahmenyertai. — selesai",
+  );
+  assert.equal(find(parse.parse(pages[0]), "a:p").length, 2);
+  assert.equal(find(parse.parse(pages[0]), "a:br").length, 1);
+  const runs = find(parse.parse(pages[0]), "a:r");
+  for (const entry of runs) {
+    const attributes = find([entry], "a:rPr")[0][":@"] as Record<
+      string,
+      string
+    >;
+    if (content(entry) === "Gereja.") assert.equal(attributes["@_b"], "1");
+    if (content(entry) === "Semoga") {
+      assert.equal(attributes["@_b"], "0");
+      assert.equal(attributes["@_i"], "1");
+    }
+  }
+});
+
+test("same-token inline intentions finish before per-paragraph responses, including giant responses", async () => {
+  const layout = await createPptxTextLayout(new JSZip());
+  const source = slide(paragraph("(teks)"), 500, 200);
+  const title = "Bagi Gereja.";
+  const body = " " + "Semoga seluruh umat bersatu. ".repeat(24).trim();
+  for (const response of [
+    "U\tKabulkanlah doa kami.",
+    "U\t" + "Jawaban lengkap. ".repeat(70).trim(),
+  ]) {
+    const pages = layout.paginate("slide1.xml", source, "teks", [
+      {
+        policy: "last",
+        paragraphs: [
+          {
+            policy: "flow",
+            runs: [
+              { text: title, bold: true },
+              { text: body, bold: false },
+            ],
+          },
+          { policy: "last", runs: [{ text: response, bold: false }] },
+        ],
+      },
+    ]);
+    assert.ok(pages.length > 1);
+    assert.equal(visible(pages), title + body + response);
+    if (response.length < 50)
+      assert.equal(visible(pages.slice(0, -1)).includes("Kabulkanlah"), false);
+    for (const entry of pages.flatMap((page) =>
+      find(parse.parse(page), "a:r"),
+    )) {
+      const attributes = find([entry], "a:rPr")[0][":@"] as Record<
+        string,
+        string
+      >;
+      if (
+        content(entry).includes("Semoga") ||
+        content(entry).includes("Jawaban") ||
+        content(entry).includes("Kabulkanlah")
+      )
+        assert.equal(attributes["@_b"], "0");
+    }
+  }
+});

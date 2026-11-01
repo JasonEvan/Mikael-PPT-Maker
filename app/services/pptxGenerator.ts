@@ -81,208 +81,6 @@ function getPlaceholderCount(slideXml: string): number {
   return count;
 }
 
-// ponytail: replace placeholders ( (teks) or (teks) ) in slide XML, handling run-splitting
-function replacePlaceholdersInXml(
-  slideXml: string,
-  replacements: string[],
-): string {
-  let replacementIndex = 0;
-
-  return slideXml.replace(/<a:p>[\s\S]*?<\/a:p>/g, (pBlock) => {
-    // Extract text from all <a:t> tags in this paragraph
-    const tMatches = pBlock.match(/<a:t[^>]*>(.*?)<\/a:t>/g) || [];
-    const fullText = tMatches.map((t) => t.replace(/<[^>]+>/g, "")).join("");
-
-    if (/\(\s*teks\s*\)/i.test(fullText)) {
-      const valToInsert =
-        replacementIndex < replacements.length
-          ? replacements[replacementIndex]
-          : "";
-      replacementIndex++;
-
-      const newText = fullText.replace(/\(\s*teks\s*\)/gi, valToInsert);
-
-      let isFirstT = true;
-      return pBlock.replace(/<a:t([^>]*)>(.*?)<\/a:t>/g, (tBlock, attrs) => {
-        if (isFirstT) {
-          isFirstT = false;
-          return `<a:t${attrs}>${escapeXml(newText)}</a:t>`;
-        }
-        return `<a:t${attrs}></a:t>`;
-      });
-    }
-
-    return pBlock;
-  });
-}
-
-// OBS Hijau's Doa Umat prayer slide has one bold placeholder. Retain that
-// styling only for the first sentence (or title line), then explicitly make
-// the remaining prayer text unbold.
-function replaceDoaUmatSinglePlaceholderInXml(
-  slideXml: string,
-  replacement: string,
-  boldFirstSentence: boolean,
-): string {
-  return slideXml.replace(/<a:p>[\s\S]*?<\/a:p>/g, (pBlock) => {
-    const tMatches = pBlock.match(/<a:t[^>]*>(.*?)<\/a:t>/g) || [];
-    const fullText = tMatches.map((t) => t.replace(/<[^>]+>/g, "")).join("");
-    if (!/\(\s*teks\s*\)/i.test(fullText)) return pBlock;
-
-    const pPrXml = pBlock.match(/<a:pPr\b[\s\S]*?<\/a:pPr>/i)?.[0] || "";
-    const baseRPrXml =
-      pBlock.match(/<a:rPr\b[^>]*\/>|<a:rPr\b[\s\S]*?<\/a:rPr>/i)?.[0] ||
-      '<a:rPr lang="en-US" sz="4800"/>';
-    const setBold = (rPrXml: string, bold: boolean) =>
-      /\bb="(?:1|0|true|false)"/i.test(rPrXml)
-        ? rPrXml.replace(/\bb="(?:1|0|true|false)"/i, `b="${bold ? 1 : 0}"`)
-        : rPrXml.replace(/<a:rPr\b/i, `<a:rPr b="${bold ? 1 : 0}"`);
-
-    const lineBreakIndex = replacement.indexOf("\n");
-    const sentenceMatch = replacement.match(/[.!?…](?=\s|$)/);
-    const sentenceEndIndex = sentenceMatch
-      ? sentenceMatch.index! + sentenceMatch[0].length
-      : -1;
-    const splitAt =
-      sentenceEndIndex >= 0 &&
-      (lineBreakIndex < 0 || sentenceEndIndex <= lineBreakIndex)
-        ? sentenceEndIndex
-        : lineBreakIndex >= 0
-          ? lineBreakIndex
-          : replacement.length;
-    const hasLineBreak = splitAt === lineBreakIndex;
-    const firstText = replacement.slice(0, splitAt).trimEnd();
-    const remainingText = replacement
-      .slice(hasLineBreak ? splitAt + 1 : splitAt)
-      .trimStart();
-    const firstRun = `<a:r>${setBold(baseRPrXml, boldFirstSentence)}<a:t>${escapeXml(firstText)}</a:t></a:r>`;
-    const remainingRun = remainingText
-      ? `${hasLineBreak ? "<a:br/>" : ""}<a:r>${setBold(baseRPrXml, false)}<a:t>${escapeXml(remainingText)}</a:t></a:r>`
-      : "";
-
-    return `<a:p>${pPrXml}${firstRun}${remainingRun}</a:p>`;
-  });
-}
-
-// ponytail: helper to fill Doa Umat intention slide (Placeholder 1 = Bold Title + Unbold Body separated by \n, Placeholder 2 = Yellow Italic Response)
-function replaceDoaUmatIntentionInXml(
-  slideXml: string,
-  title: string,
-  body: string,
-  response?: string,
-): string {
-  let replacementIndex = 0;
-
-  return slideXml.replace(/<a:p>[\s\S]*?<\/a:p>/g, (pBlock) => {
-    const tMatches = pBlock.match(/<a:t[^>]*>(.*?)<\/a:t>/g) || [];
-    const fullText = tMatches.map((t) => t.replace(/<[^>]+>/g, "")).join("");
-
-    if (/\(\s*teks\s*\)/i.test(fullText)) {
-      if (replacementIndex === 0) {
-        replacementIndex++;
-
-        const pPrMatch = pBlock.match(/<a:pPr\b[\s\S]*?<\/a:pPr>/i);
-        const pPrXml = pPrMatch ? pPrMatch[0] : "";
-
-        const rPrMatch = pBlock.match(/<a:rPr\b[\s\S]*?<\/a:rPr>/i);
-        let rPrBoldXml = rPrMatch
-          ? rPrMatch[0]
-          : '<a:rPr lang="en-US" sz="4800" b="1"/>';
-
-        if (!/b="1"/i.test(rPrBoldXml)) {
-          rPrBoldXml = rPrBoldXml.replace(/<a:rPr/i, '<a:rPr b="1"');
-        }
-
-        const rPrUnboldXml = rPrBoldXml
-          .replace(/\bb="1"/gi, 'b="0"')
-          .replace(/\bb="true"/gi, 'b="0"');
-
-        if (title && body) {
-          const titleParagraph = `<a:p>${pPrXml}<a:r>${rPrBoldXml}<a:t>${escapeXml(title)}</a:t></a:r></a:p>`;
-          const bodyParagraph = `<a:p>${pPrXml}<a:r>${rPrUnboldXml}<a:t>${escapeXml(body)}</a:t></a:r></a:p>`;
-          return `${titleParagraph}${bodyParagraph}`;
-        } else {
-          const singleText = title || body || "";
-          const rPrStyle = title ? rPrBoldXml : rPrUnboldXml;
-          return `<a:p>${pPrXml}<a:r>${rPrStyle}<a:t>${escapeXml(singleText)}</a:t></a:r></a:p>`;
-        }
-      } else if (replacementIndex === 1) {
-        replacementIndex++;
-        const responseText = response ? `U\t${response}` : "";
-
-        let isFirstT = true;
-        return pBlock.replace(/<a:t([^>]*)>(.*?)<\/a:t>/g, (tBlock, attrs) => {
-          if (isFirstT) {
-            isFirstT = false;
-            return `<a:t${attrs}>${escapeXml(responseText)}</a:t>`;
-          }
-          return `<a:t${attrs}></a:t>`;
-        });
-      }
-    }
-
-    return pBlock;
-  });
-}
-
-// ponytail: helper to structurally remove all intro paragraphs appearing BEFORE the (teks) placeholder in txBody
-function stripIntroParagraphs(slideXml: string): string {
-  return slideXml.replace(/<p:txBody>[\s\S]*?<\/p:txBody>/g, (txBodyBlock) => {
-    const pBlocks = txBodyBlock.match(/<a:p>[\s\S]*?<\/a:p>/g) || [];
-    let placeholderIdx = -1;
-
-    for (let i = 0; i < pBlocks.length; i++) {
-      const tMatches = pBlocks[i].match(/<a:t[^>]*>(.*?)<\/a:t>/g) || [];
-      const fullText = tMatches.map((t) => t.replace(/<[^>]+>/g, "")).join("");
-      if (/\(\s*teks\s*\)/i.test(fullText)) {
-        placeholderIdx = i;
-        break;
-      }
-    }
-
-    if (placeholderIdx <= 0) {
-      return txBodyBlock;
-    }
-
-    const remainingP = pBlocks.slice(placeholderIdx).join("");
-    return txBodyBlock.replace(/<a:p>[\s\S]*?<\/a:p>/g, (match, offset) => {
-      if (offset === txBodyBlock.indexOf("<a:p>")) {
-        return remainingP;
-      }
-      return "";
-    });
-  });
-}
-
-// ponytail: helper to structurally remove all closing/response paragraphs appearing AFTER the (teks) placeholder in txBody
-function stripClosingParagraphs(slideXml: string): string {
-  return slideXml.replace(/<p:txBody>[\s\S]*?<\/p:txBody>/g, (txBodyBlock) => {
-    const pBlocks = txBodyBlock.match(/<a:p>[\s\S]*?<\/a:p>/g) || [];
-    let placeholderIdx = -1;
-
-    for (let i = 0; i < pBlocks.length; i++) {
-      const tMatches = pBlocks[i].match(/<a:t[^>]*>(.*?)<\/a:t>/g) || [];
-      const fullText = tMatches.map((t) => t.replace(/<[^>]+>/g, "")).join("");
-      if (/\(\s*teks\s*\)/i.test(fullText)) {
-        placeholderIdx = i;
-        break;
-      }
-    }
-
-    if (placeholderIdx < 0 || placeholderIdx >= pBlocks.length - 1) {
-      return txBodyBlock;
-    }
-
-    const remainingP = pBlocks.slice(0, placeholderIdx + 1).join("");
-    return txBodyBlock.replace(/<a:p>[\s\S]*?<\/a:p>/g, (match, offset) => {
-      if (offset === txBodyBlock.indexOf("<a:p>")) {
-        return remainingP;
-      }
-      return "";
-    });
-  });
-}
-
 // ponytail: update speaker notes in ppt/notesSlides/notesSlideX.xml, completely replacing template notes
 function updateNotesSlideXml(notesXml: string, notesText: string): string {
   if (!notesText) return notesXml;
@@ -302,101 +100,43 @@ function updateNotesSlideXml(notesXml: string, notesText: string): string {
   );
 }
 
-// ponytail: dynamically calculate overflow cut points for any text based on character limit & punctuation boundaries (. , ! ? ;)
-function splitTextIntoSlideChunks(
-  text: string,
-  maxCharsPerSlide: number = 320,
-): string[] {
-  if (!text || text.trim().length === 0) return [""];
-  const trimmed = text.trim();
-
-  // Return single chunk if text fits within maxCharsPerSlide
-  if (trimmed.length <= maxCharsPerSlide) {
-    return [trimmed];
-  }
-
-  const chunks: string[] = [];
-  let remaining = trimmed;
-
-  while (remaining.length > maxCharsPerSlide) {
-    const slice = remaining.slice(0, maxCharsPerSlide);
-
-    let lastPunctuationEnd = -1;
-    const punctuationRegex = /[.,!?;]\s+/g;
-    let match: RegExpExecArray | null;
-
-    while ((match = punctuationRegex.exec(slice)) !== null) {
-      lastPunctuationEnd = match.index + match[0].length - 1;
-    }
-
-    let cutIndex = -1;
-
-    // Prefer cutting at punctuation boundary if it occurs past 35% of maxCharsPerSlide
-    if (lastPunctuationEnd > Math.floor(maxCharsPerSlide * 0.35)) {
-      cutIndex = lastPunctuationEnd + 1; // Include punctuation mark
-    } else {
-      // Fallback: cut at last space (word boundary)
-      const lastSpaceIndex = slice.lastIndexOf(" ");
-      if (lastSpaceIndex > Math.floor(maxCharsPerSlide * 0.35)) {
-        cutIndex = lastSpaceIndex;
-      } else {
-        // Fallback to exact limit
-        cutIndex = maxCharsPerSlide;
-      }
-    }
-
-    const chunk = remaining.slice(0, cutIndex).trim();
-    if (chunk.length > 0) {
-      chunks.push(chunk);
-    }
-    remaining = remaining.slice(cutIndex).trim();
-  }
-
-  if (remaining.length > 0) {
-    chunks.push(remaining);
-  }
-
-  return chunks.length > 0 ? chunks : [trimmed];
-}
-
-// ponytail: helper to generically split off the last sentence by punctuation boundary to accompany the congregation response on an overflow slide (ZERO hardcoded words)
-function splitLastSentence(bodyText: string): {
-  mainBody: string;
-  lastSentence: string;
-} {
-  const trimmed = bodyText.trim();
-  if (trimmed.length === 0) return { mainBody: "", lastSentence: "" };
-
-  // Strip trailing punctuation when searching for the sentence break point
-  const searchSlice = trimmed.replace(/[.,!?;…]+$/, "").trim();
-
-  let lastPunctIdx = -1;
-  const delimiters = [". ", "! ", "? ", "; ", "… ", "…", "\n"];
-
-  for (const delim of delimiters) {
-    const idx = searchSlice.lastIndexOf(delim);
-    if (idx > lastPunctIdx) {
-      lastPunctIdx = idx;
-    }
-  }
-
-  if (lastPunctIdx > 0 && lastPunctIdx > Math.floor(trimmed.length * 0.35)) {
-    const cutIndex = lastPunctIdx + 1;
-    const mainBody = trimmed.slice(0, cutIndex).trim();
-    const lastSentence = trimmed.slice(cutIndex).trim();
-
-    if (mainBody.length > 0 && lastSentence.length > 0) {
-      return { mainBody, lastSentence };
-    }
-  }
-
-  return { mainBody: trimmed, lastSentence: "" };
+// OBS has one intention token: the initial sentence/title is emphasized inline,
+// while its response follows the entire body in that same measured shape.
+function obsIntentionReplacement(
+  item: NonNullable<MappedLiturgyData["doaUmat"]>["intentions"][number],
+): PptxTextReplacement {
+  const body = [item.title, item.body].filter(Boolean).join("\n");
+  const lineBreak = body.indexOf("\n");
+  const sentence = body.match(/[.!?…](?=\s|$)/);
+  const sentenceEnd = sentence ? sentence.index! + sentence[0].length : -1;
+  const splitAt =
+    sentenceEnd >= 0 && (lineBreak < 0 || sentenceEnd <= lineBreak)
+      ? sentenceEnd
+      : lineBreak >= 0
+        ? lineBreak
+        : body.length;
+  return {
+    paragraphs: [
+      {
+        runs: [
+          { text: body.slice(0, splitAt), bold: true },
+          { text: body.slice(splitAt), bold: false },
+        ],
+      },
+      ...(item.response
+        ? [
+            {
+              text: `U\t${item.response}`,
+              bold: false,
+              policy: "last" as const,
+            },
+          ]
+        : []),
+    ],
+  };
 }
 
 export interface PptxGeneratorOptions {
-  doaKolektaMaxChars?: number;
-  doaUmatIntentionMaxChars?: number;
-  doaSesudahKomuniMaxChars?: number;
   usesPlaceholderOnlyInjilContentSlide?: boolean;
   omitsGospelCitationPrefix?: boolean;
   usesSinglePlaceholderDoaUmatIntentions?: boolean;
@@ -408,19 +148,6 @@ export async function generatePPTXBufferForTemplate(
   mappedData: MappedLiturgyData,
   templateFileName: string,
   options: PptxGeneratorOptions = {},
-): Promise<Buffer> {
-  return generatePPTXBufferForTemplateInternal(
-    mappedData,
-    templateFileName,
-    options,
-  );
-}
-
-async function generatePPTXBufferForTemplateInternal(
-  mappedData: MappedLiturgyData,
-  templateFileName: string,
-  options: PptxGeneratorOptions = {},
-  measuredWeekly = false,
 ): Promise<Buffer> {
   const templatePath = path.join(
     process.cwd(),
@@ -435,9 +162,9 @@ async function generatePPTXBufferForTemplateInternal(
 
   const templateBuffer = await fs.promises.readFile(templatePath);
   const zip = await JSZip.loadAsync(templateBuffer);
-  const textLayout = measuredWeekly
-    ? await createPptxTextLayout(zip, { fontProfile: "indonesian" })
-    : undefined;
+  const textLayout = await createPptxTextLayout(zip, {
+    fontProfile: "indonesian",
+  });
 
   // 1. Read presentation structure and slide mapping
   const presentationXml = await zip.file("ppt/presentation.xml")?.async("text");
@@ -615,7 +342,7 @@ async function generatePPTXBufferForTemplateInternal(
     const slideZip = zip.file(slide.fileName);
     if (!slideZip) continue;
 
-    let slideXml = await slideZip.async("text");
+    const slideXml = await slideZip.async("text");
 
     // Extract visible slide text to anchor slide type by internal text/placeholder content
     const pMatches = slideXml.match(/<a:p>[\s\S]*?<\/a:p>/g) || [];
@@ -691,257 +418,35 @@ async function generatePPTXBufferForTemplateInternal(
     ) {
       continue;
     }
-    if (textLayout) {
-      let sequences: PptxTextReplacement[][] | undefined;
-      let notesText = "";
+    let sequences: PptxTextReplacement[][] | undefined;
+    let notesText = "";
 
-      if (slideTextUpper.includes("KASIHANILAH KAMI")) {
-        const idx =
-          seruanCount < (mappedData.seruanTobat?.length || 0) ? seruanCount : 0;
-        sequences = [[mappedData.seruanTobat?.[idx] || ""]];
-        seruanCount++;
-      } else if (
-        slideTextUpper.includes("MARILAH KITA BERDOA") &&
-        !hasPassedBacaanPertama
-      ) {
-        sequences = [[mappedData.doaKolekta || ""]];
-      } else if (
-        slideTextUpper.includes("BACAAN PERTAMA") ||
-        slideTextUpper.includes("BACAAN I ")
-      ) {
-        sequences = [
-          [
-            formatEpigraph(mappedData.bacaanPertama?.epigraph),
-            cleanCitation(mappedData.bacaanPertama?.citation),
-          ],
-        ];
-        notesText = mappedData.bacaanPertama?.notesBody || "";
-      } else if (
-        (slideTextUpper.includes("MAZMUR") ||
-          slideTextUpper.includes("TANGGAPAN") ||
-          (hasPassedBacaanPertama && !hasPassedBacaanKedua)) &&
-        !hasHandledMazmur &&
-        !slideTextUpper.includes("BACAAN KEDUA") &&
-        !slideTextUpper.includes("BACAAN PERTAMA")
-      ) {
-        // A verse is a separate sequence, even when another verse would fit.
-        sequences = (mappedData.mazmurTanggapan?.verses || []).map((verse) => [
-          verse,
-        ]);
-        hasHandledMazmur = true;
-      } else if (
-        slideTextUpper.includes("BACAAN KEDUA") ||
-        slideTextUpper.includes("BACAAN II ")
-      ) {
-        sequences = [
-          [
-            formatEpigraph(mappedData.bacaanKedua?.epigraph),
-            cleanCitation(mappedData.bacaanKedua?.citation),
-          ],
-        ];
-        notesText = mappedData.bacaanKedua?.notesBody || "";
-      } else if (slideTextUpper.includes("INILAH INJIL SUCI MENURUT")) {
-        sequences = [[mappedData.bacaanInjil?.gospelName || ""]];
-      } else if (
-        slideTextUpper.includes("INJIL") &&
-        !slideTextUpper.includes("PENGANTAR")
-      ) {
-        sequences = [
-          [
-            formatEpigraph(mappedData.bacaanInjil?.epigraph),
-            cleanGospelCitation(mappedData.bacaanInjil?.citation),
-          ],
-        ];
-        notesText = mappedData.bacaanInjil?.notesBody || "";
-      } else if (hasPassedDoaUmatTitle && !hasHandledDoaUmatIntro) {
-        if (getPlaceholderCount(slideXml) === 1) {
-          sequences = [[mappedData.doaUmat?.intro || ""]];
-          hasHandledDoaUmatIntro = true;
-        }
-      } else if (
-        hasPassedDoaUmatTitle &&
-        hasHandledDoaUmatIntro &&
-        !hasHandledDoaUmatIntentions
-      ) {
-        if (getPlaceholderCount(slideXml) >= 2) {
-          const intentions = mappedData.doaUmat?.intentions || [];
-          sequences = intentions.length
-            ? intentions.map<PptxTextReplacement[]>((item) => [
-                {
-                  paragraphs: [
-                    ...(item.title ? [{ text: item.title, bold: true }] : []),
-                    ...(item.body ? [{ text: item.body, bold: false }] : []),
-                  ],
-                },
-                {
-                  paragraphs: item.response
-                    ? [{ text: `U\t${item.response}` }]
-                    : [],
-                  policy: "last",
-                },
-              ])
-            : [["", ""]];
-          hasHandledDoaUmatIntentions = true;
-        }
-      } else if (
-        hasPassedDoaUmatTitle &&
-        hasHandledDoaUmatIntentions &&
-        !hasHandledDoaUmatOutro
-      ) {
-        sequences = [[mappedData.doaUmat?.closing || ""]];
-        hasHandledDoaUmatOutro = true;
-        hasPassedDoaUmatTitle = false;
-      } else if (
-        slideTextUpper.includes("DOA ATAS PERSEMBAHAN") ||
-        slideTextUpper.includes("ATAS PERSEMBAHAN")
-      ) {
-        sequences = [[mappedData.doaAtasPersembahan || ""]];
-      } else if (
-        (hasPassedDoaKomuniTitle && !hasHandledDoaKomuni) ||
-        slideTextUpper.includes("DOA SESUDAH KOMUNI") ||
-        slideTextUpper.includes("SESUDAH KOMUNI")
-      ) {
-        sequences = [[mappedData.doaSesudahKomuni || ""]];
-        hasHandledDoaKomuni = true;
-        hasPassedDoaKomuniTitle = false;
-      }
-
-      if (sequences?.length) {
-        // Fixed prompts and responses share the measured shape budget with
-        // its tokens. Keep their exact template text/style, once at each end.
-        const paragraphTexts = pMatches.map((paragraph) =>
-          (paragraph.match(/<a:t[^>]*>(.*?)<\/a:t>/g) || [])
-            .map((run) => run.replace(/<[^>]+>/g, ""))
-            .join(""),
-        );
-        const firstToken = paragraphTexts.findIndex((text) =>
-          /\(\s*teks\s*\)/i.test(text),
-        );
-        const lastToken = paragraphTexts.reduce(
-          (last, text, index) => (/\(\s*teks\s*\)/i.test(text) ? index : last),
-          -1,
-        );
-        const firstOnlyTexts = paragraphTexts
-          .slice(0, firstToken)
-          .filter((text) => text.trim());
-        const lastOnlyTexts = paragraphTexts
-          .slice(lastToken + 1)
-          .filter((text) => text.trim());
-        let wroteFirstPage = false;
-        let lastRId = slide.rId;
-        for (const replacements of sequences) {
-          const pages = textLayout.paginate(
-            slide.fileName,
-            slideXml,
-            "teks",
-            replacements,
-            { firstOnlyTexts, lastOnlyTexts, preserveTemplateSpacers: true },
-          );
-          for (const pageXml of pages) {
-            if (!wroteFirstPage) {
-              zip.file(slide.fileName, pageXml);
-              wroteFirstPage = true;
-            } else {
-              const duplicate = await duplicateSlide(
-                slide.fileName,
-                lastRId,
-                pageXml,
-              );
-              lastRId = duplicate.newRId;
-            }
-          }
-        }
-        await updateSlideNotes(slide.fileName, notesText);
-      }
-      // Weekly pages are already final XML; never run legacy substitution or
-      // character-based chunking over the measured output.
-      continue;
-    }
-
-    // 1. OBS Hijau Seruan Tobat invocation slides. Their placeholders have no
-    // identifying text, so fill the first three placeholders after the title.
     if (hasPassedSeruanTobatTitle && seruanCount < 3) {
-      slideXml = replacePlaceholdersInXml(slideXml, [
-        mappedData.seruanTobat?.[seruanCount] || "",
-      ]);
-      zip.file(slide.fileName, slideXml);
+      sequences = [[mappedData.seruanTobat?.[seruanCount] || ""]];
       seruanCount++;
       if (seruanCount === 3) hasPassedSeruanTobatTitle = false;
-    }
-
-    // 2. Seruan Tobat Content Slides
-    else if (slideTextUpper.includes("KASIHANILAH KAMI")) {
+    } else if (slideTextUpper.includes("KASIHANILAH KAMI")) {
       const idx =
         seruanCount < (mappedData.seruanTobat?.length || 0) ? seruanCount : 0;
-      slideXml = replacePlaceholdersInXml(slideXml, [
-        mappedData.seruanTobat?.[idx] || "",
-      ]);
-      zip.file(slide.fileName, slideXml);
+      sequences = [[mappedData.seruanTobat?.[idx] || ""]];
       seruanCount++;
-    }
-
-    // 3. Doa Kolekta Content Slide
-    else if (
+    } else if (
       slideTextUpper.includes("MARILAH KITA BERDOA") &&
       !hasPassedBacaanPertama
     ) {
-      const originalSlideXml = slideXml;
-      const kolektaChunks = splitTextIntoSlideChunks(
-        mappedData.doaKolekta || "",
-        options.doaKolektaMaxChars ?? 260,
-      );
-
-      if (kolektaChunks.length === 1) {
-        const filledSlideXml = replacePlaceholdersInXml(originalSlideXml, [
-          kolektaChunks[0] || "",
-        ]);
-        zip.file(slide.fileName, filledSlideXml);
-      } else {
-        let slide1Xml = stripClosingParagraphs(originalSlideXml);
-        slide1Xml = replacePlaceholdersInXml(slide1Xml, [kolektaChunks[0]]);
-        zip.file(slide.fileName, slide1Xml);
-
-        let lastRId = slide.rId;
-        for (let i = 1; i < kolektaChunks.length; i++) {
-          const isLast = i === kolektaChunks.length - 1;
-          let dupSlideXml = originalSlideXml;
-
-          dupSlideXml = stripIntroParagraphs(dupSlideXml);
-          if (!isLast) {
-            dupSlideXml = stripClosingParagraphs(dupSlideXml);
-          }
-
-          const filledChunkXml = replacePlaceholdersInXml(dupSlideXml, [
-            kolektaChunks[i],
-          ]);
-          const { newRId } = await duplicateSlide(
-            slide.fileName,
-            lastRId,
-            filledChunkXml,
-          );
-          lastRId = newRId;
-        }
-      }
-    }
-
-    // 3. Bacaan Pertama Content Slide
-    else if (
+      sequences = [[mappedData.doaKolekta || ""]];
+    } else if (
       slideTextUpper.includes("BACAAN PERTAMA") ||
       slideTextUpper.includes("BACAAN I ")
     ) {
-      const epigraph = formatEpigraph(mappedData.bacaanPertama?.epigraph);
-      const citation = cleanCitation(mappedData.bacaanPertama?.citation);
-      slideXml = replacePlaceholdersInXml(slideXml, [epigraph, citation]);
-      zip.file(slide.fileName, slideXml);
-
-      await updateSlideNotes(
-        slide.fileName,
-        mappedData.bacaanPertama?.notesBody || "",
-      );
-    }
-
-    // 4. Mazmur Tanggapan Content Slide (duplication for all verses sequentially)
-    else if (
+      sequences = [
+        [
+          formatEpigraph(mappedData.bacaanPertama?.epigraph),
+          cleanCitation(mappedData.bacaanPertama?.citation),
+        ],
+      ];
+      notesText = mappedData.bacaanPertama?.notesBody || "";
+    } else if (
       (slideTextUpper.includes("MAZMUR") ||
         slideTextUpper.includes("TANGGAPAN") ||
         (hasPassedBacaanPertama && !hasPassedBacaanKedua)) &&
@@ -949,414 +454,146 @@ async function generatePPTXBufferForTemplateInternal(
       !slideTextUpper.includes("BACAAN KEDUA") &&
       !slideTextUpper.includes("BACAAN PERTAMA")
     ) {
-      const verses = mappedData.mazmurTanggapan?.verses || [];
-      const originalSlideXml = slideXml;
-
-      if (verses.length > 0) {
-        // Fill 1st verse into 1st Mazmur placeholder slide
-        const filledSlideXml = replacePlaceholdersInXml(originalSlideXml, [
-          verses[0] || "",
-        ]);
-        zip.file(slide.fileName, filledSlideXml);
-
-        // Duplicate slide for all remaining verses (verses[1], verses[2], etc.)
-        if (verses.length > 1) {
-          let lastRId = slide.rId;
-          for (let i = 1; i < verses.length; i++) {
-            const filledVerseXml = replacePlaceholdersInXml(originalSlideXml, [
-              verses[i],
-            ]);
-            const { newRId } = await duplicateSlide(
-              slide.fileName,
-              lastRId,
-              filledVerseXml,
-            );
-            lastRId = newRId;
-          }
-        }
-      }
+      // A verse is a separate sequence, even when another verse would fit.
+      // With zero verses the original placeholder is intentionally untouched.
+      sequences = (mappedData.mazmurTanggapan?.verses || []).map((verse) => [
+        verse,
+      ]);
       hasHandledMazmur = true;
-    }
-
-    // 5. Bacaan Kedua Content Slide
-    else if (
+    } else if (
       slideTextUpper.includes("BACAAN KEDUA") ||
       slideTextUpper.includes("BACAAN II ")
     ) {
-      const epigraph = formatEpigraph(mappedData.bacaanKedua?.epigraph);
-      const citation = cleanCitation(mappedData.bacaanKedua?.citation);
-      slideXml = replacePlaceholdersInXml(slideXml, [epigraph, citation]);
-      zip.file(slide.fileName, slideXml);
-
-      await updateSlideNotes(
-        slide.fileName,
-        mappedData.bacaanKedua?.notesBody || "",
-      );
-    }
-
-    // 6. Bacaan Injil - Gospel Citation Intro Slide
-    else if (slideTextUpper.includes("INILAH INJIL SUCI MENURUT")) {
-      const gospelName = mappedData.bacaanInjil?.gospelName || "";
-      slideXml = replacePlaceholdersInXml(slideXml, [gospelName]);
-      zip.file(slide.fileName, slideXml);
-    }
-
-    // 7. Bacaan Injil - Content Slide. The first placeholder is the
-    // epigraph; the second is the source/citation extracted from the DOCX.
-    else if (
-      (options.usesPlaceholderOnlyInjilContentSlide &&
-        hasPendingInjilContent) ||
+      sequences = [
+        [
+          formatEpigraph(mappedData.bacaanKedua?.epigraph),
+          cleanCitation(mappedData.bacaanKedua?.citation),
+        ],
+      ];
+      notesText = mappedData.bacaanKedua?.notesBody || "";
+    } else if (slideTextUpper.includes("INILAH INJIL SUCI MENURUT")) {
+      sequences = [[mappedData.bacaanInjil?.gospelName || ""]];
+    } else if (
+      (hasPendingInjilContent && getPlaceholderCount(slideXml) === 2) ||
       (slideTextUpper.includes("INJIL") &&
         !slideTextUpper.includes("PENGANTAR"))
     ) {
-      const epigraph = formatEpigraph(mappedData.bacaanInjil?.epigraph);
-      const citation = cleanGospelCitation(
-        mappedData.bacaanInjil?.citation,
-        options.omitsGospelCitationPrefix,
-      );
-      slideXml = replacePlaceholdersInXml(slideXml, [epigraph, citation]);
-      zip.file(slide.fileName, slideXml);
-
-      await updateSlideNotes(
-        slide.fileName,
-        mappedData.bacaanInjil?.notesBody || "",
-      );
+      sequences = [
+        [
+          formatEpigraph(mappedData.bacaanInjil?.epigraph),
+          cleanGospelCitation(
+            mappedData.bacaanInjil?.citation,
+            options.omitsGospelCitationPrefix,
+          ),
+        ],
+      ];
+      notesText = mappedData.bacaanInjil?.notesBody || "";
       hasPendingInjilContent = false;
-    }
-
-    // 8. Doa Umat Intro Slide (Slide 63: right after DOA UMAT title slide with 1 placeholder, supporting overflow splitting)
-    else if (hasPassedDoaUmatTitle && !hasHandledDoaUmatIntro) {
-      const count = getPlaceholderCount(slideXml);
-      if (count === 1) {
-        const originalSlideXml = slideXml;
-        const introChunks = splitTextIntoSlideChunks(
-          mappedData.doaUmat?.intro || "",
-          260,
-        );
-
-        const filledIntroXml = replacePlaceholdersInXml(originalSlideXml, [
-          introChunks[0] || "",
-        ]);
-        zip.file(slide.fileName, filledIntroXml);
-
-        if (introChunks.length > 1) {
-          let lastRId = slide.rId;
-          for (let i = 1; i < introChunks.length; i++) {
-            const filledChunkXml = replacePlaceholdersInXml(originalSlideXml, [
-              introChunks[i],
-            ]);
-            const { newRId } = await duplicateSlide(
-              slide.fileName,
-              lastRId,
-              filledChunkXml,
-            );
-            lastRId = newRId;
-          }
-        }
+    } else if (hasPassedDoaUmatTitle && !hasHandledDoaUmatIntro) {
+      if (getPlaceholderCount(slideXml) === 1) {
+        sequences = [[mappedData.doaUmat?.intro || ""]];
         hasHandledDoaUmatIntro = true;
       }
-    }
-
-    // 9. Doa Umat Intentions Content Slide (Slide 64: 2 placeholders - Placeholder 1 = Bold Title & Unbold Body (\n), Placeholder 2 = Yellow Italic Response, with overflow splitting)
-    else if (
+    } else if (
       hasPassedDoaUmatTitle &&
       hasHandledDoaUmatIntro &&
       !hasHandledDoaUmatIntentions
     ) {
       const count = getPlaceholderCount(slideXml);
+      const intentions = mappedData.doaUmat?.intentions || [];
       if (options.usesSinglePlaceholderDoaUmatIntentions && count === 1) {
-        const originalSlideXml = slideXml;
-        const intentions = mappedData.doaUmat?.intentions || [];
-        const intentionChunks = intentions.flatMap((item) => {
-          const intentionText = [item.title, item.body]
-            .filter(Boolean)
-            .join("\n");
-          const chunks = splitTextIntoSlideChunks(
-            intentionText,
-            options.doaUmatIntentionMaxChars ?? 260,
-          );
-
-          return chunks.map((chunk, index) => ({
-            text:
-              index === chunks.length - 1 && item.response
-                ? `${chunk}\nU\t${item.response}`
-                : chunk,
-            boldFirstSentence: index === 0,
-          }));
-        });
-
-        const firstSlideXml = replaceDoaUmatSinglePlaceholderInXml(
-          originalSlideXml,
-          intentionChunks[0]?.text || "",
-          intentionChunks[0]?.boldFirstSentence || false,
-        );
-        zip.file(slide.fileName, firstSlideXml);
-
-        let lastRId = slide.rId;
-        for (let i = 1; i < intentionChunks.length; i++) {
-          const filledIntentionXml = replaceDoaUmatSinglePlaceholderInXml(
-            originalSlideXml,
-            intentionChunks[i].text,
-            intentionChunks[i].boldFirstSentence,
-          );
-          const { newRId } = await duplicateSlide(
-            slide.fileName,
-            lastRId,
-            filledIntentionXml,
-          );
-          lastRId = newRId;
-        }
-
+        sequences = intentions.length
+          ? intentions.map((item) => [obsIntentionReplacement(item)])
+          : [[""]];
         hasHandledDoaUmatIntentions = true;
       } else if (count >= 2) {
-        const originalSlideXml = slideXml;
-        const intentions = mappedData.doaUmat?.intentions || [];
-
-        if (intentions.length > 0) {
-          let isFirstSlide = true;
-          let lastRId = slide.rId;
-
-          const maxCombinedLimit = 250;
-
-          for (let i = 0; i < intentions.length; i++) {
-            const item = intentions[i];
-            const bodyChunks = splitTextIntoSlideChunks(item.body || "", 260);
-
-            for (let c = 0; c < bodyChunks.length; c++) {
-              const bodyChunk = bodyChunks[c];
-              const isLastBodyChunk = c === bodyChunks.length - 1;
-              const intentionTitle = c === 0 ? item.title : "";
-              const responseText = item.response ? item.response : "";
-
-              if (isLastBodyChunk) {
-                // Check if bodyChunk + responseText exceeds visual height (maxCombinedLimit)
-                if (
-                  responseText &&
-                  bodyChunk.length + responseText.length > maxCombinedLimit
-                ) {
-                  const { mainBody, lastSentence } =
-                    splitLastSentence(bodyChunk);
-
-                  // Slide 1: Main body chunk (without last sentence / Kami mohon)
-                  const filledIntentionXml1 = replaceDoaUmatIntentionInXml(
-                    originalSlideXml,
-                    intentionTitle,
-                    mainBody,
-                    "",
-                  );
-
-                  if (isFirstSlide) {
-                    zip.file(slide.fileName, filledIntentionXml1);
-                    isFirstSlide = false;
-                  } else {
-                    const { newRId } = await duplicateSlide(
-                      slide.fileName,
-                      lastRId,
-                      filledIntentionXml1,
-                    );
-                    lastRId = newRId;
-                  }
-
-                  // Slide 2: Duplicated slide for Last Sentence ("Kami mohon ...") + Response!
-                  const filledResponseXml = replaceDoaUmatIntentionInXml(
-                    originalSlideXml,
-                    "",
-                    lastSentence,
-                    responseText,
-                  );
-                  const { newRId } = await duplicateSlide(
-                    slide.fileName,
-                    lastRId,
-                    filledResponseXml,
-                  );
-                  lastRId = newRId;
-                } else {
-                  // Both bodyChunk & responseText fit on current slide
-                  const filledIntentionXml = replaceDoaUmatIntentionInXml(
-                    originalSlideXml,
-                    intentionTitle,
-                    bodyChunk,
-                    responseText,
-                  );
-
-                  if (isFirstSlide) {
-                    zip.file(slide.fileName, filledIntentionXml);
-                    isFirstSlide = false;
-                  } else {
-                    const { newRId } = await duplicateSlide(
-                      slide.fileName,
-                      lastRId,
-                      filledIntentionXml,
-                    );
-                    lastRId = newRId;
-                  }
-                }
-              } else {
-                // Non-last body chunk (no response)
-                const filledIntentionXml = replaceDoaUmatIntentionInXml(
-                  originalSlideXml,
-                  intentionTitle,
-                  bodyChunk,
-                  "",
-                );
-
-                if (isFirstSlide) {
-                  zip.file(slide.fileName, filledIntentionXml);
-                  isFirstSlide = false;
-                } else {
-                  const { newRId } = await duplicateSlide(
-                    slide.fileName,
-                    lastRId,
-                    filledIntentionXml,
-                  );
-                  lastRId = newRId;
-                }
-              }
-            }
-          }
-        } else {
-          const clearedSlideXml = replacePlaceholdersInXml(originalSlideXml, [
-            "",
-            "",
-          ]);
-          zip.file(slide.fileName, clearedSlideXml);
-        }
+        sequences = intentions.length
+          ? intentions.map<PptxTextReplacement[]>((item) => [
+              {
+                paragraphs: [
+                  ...(item.title ? [{ text: item.title, bold: true }] : []),
+                  ...(item.body ? [{ text: item.body, bold: false }] : []),
+                ],
+              },
+              {
+                paragraphs: item.response
+                  ? [{ text: `U\t${item.response}` }]
+                  : [],
+                policy: "last",
+              },
+            ])
+          : [["", ""]];
         hasHandledDoaUmatIntentions = true;
       }
-    }
-
-    // 10. Doa Umat Outro / Penutup Slide (Slide 66: U Amin. & 1 placeholder, supporting overflow splitting)
-    else if (
+    } else if (
       hasPassedDoaUmatTitle &&
       hasHandledDoaUmatIntentions &&
       !hasHandledDoaUmatOutro
     ) {
-      const originalSlideXml = slideXml;
-      const outroChunks = splitTextIntoSlideChunks(
-        mappedData.doaUmat?.closing || "",
-        260,
-      );
-
-      // The template already contains the fixed "U Amin." response after
-      // the closing-text placeholder. When the closing spans multiple slides,
-      // show that response only after the final chunk.
-      const firstOutroSlideXml =
-        outroChunks.length > 1
-          ? stripClosingParagraphs(originalSlideXml)
-          : originalSlideXml;
-      const filledOutroXml = replacePlaceholdersInXml(firstOutroSlideXml, [
-        outroChunks[0] || "",
-      ]);
-      zip.file(slide.fileName, filledOutroXml);
-
-      if (outroChunks.length > 1) {
-        let lastRId = slide.rId;
-        for (let i = 1; i < outroChunks.length; i++) {
-          const isLast = i === outroChunks.length - 1;
-          const continuationSlideXml = isLast
-            ? originalSlideXml
-            : stripClosingParagraphs(originalSlideXml);
-          const filledChunkXml = replacePlaceholdersInXml(
-            continuationSlideXml,
-            [outroChunks[i]],
-          );
-          const { newRId } = await duplicateSlide(
-            slide.fileName,
-            lastRId,
-            filledChunkXml,
-          );
-          lastRId = newRId;
-        }
-      }
+      sequences = [[mappedData.doaUmat?.closing || ""]];
       hasHandledDoaUmatOutro = true;
       hasPassedDoaUmatTitle = false;
-    }
-
-    // 11. Doa Atas Persembahan Content Slide
-    else if (
+    } else if (
       slideTextUpper.includes("DOA ATAS PERSEMBAHAN") ||
       slideTextUpper.includes("ATAS PERSEMBAHAN")
     ) {
-      const originalSlideXml = slideXml;
-      const persembahanChunks = splitTextIntoSlideChunks(
-        mappedData.doaAtasPersembahan || "",
-        240,
-      );
-
-      if (persembahanChunks.length === 1) {
-        const filledSlide77Xml = replacePlaceholdersInXml(originalSlideXml, [
-          persembahanChunks[0] || "",
-        ]);
-        zip.file(slide.fileName, filledSlide77Xml);
-      } else {
-        let slide1Xml = stripClosingParagraphs(originalSlideXml);
-        slide1Xml = replacePlaceholdersInXml(slide1Xml, [persembahanChunks[0]]);
-        zip.file(slide.fileName, slide1Xml);
-
-        let lastRId = slide.rId;
-        for (let i = 1; i < persembahanChunks.length; i++) {
-          const isLast = i === persembahanChunks.length - 1;
-          let dupSlideXml = originalSlideXml;
-          dupSlideXml = stripIntroParagraphs(dupSlideXml);
-
-          if (!isLast) {
-            dupSlideXml = stripClosingParagraphs(dupSlideXml);
-          }
-
-          const filledChunkXml = replacePlaceholdersInXml(dupSlideXml, [
-            persembahanChunks[i],
-          ]);
-          const { newRId } = await duplicateSlide(
-            slide.fileName,
-            lastRId,
-            filledChunkXml,
-          );
-          lastRId = newRId;
-        }
-      }
-    }
-
-    // 12. Doa Sesudah Komuni Content Slide (Slide 92: right after DOA SESUDAH KOMUNI title slide)
-    else if (
+      sequences = [[mappedData.doaAtasPersembahan || ""]];
+    } else if (
       (hasPassedDoaKomuniTitle && !hasHandledDoaKomuni) ||
       slideTextUpper.includes("DOA SESUDAH KOMUNI") ||
       slideTextUpper.includes("SESUDAH KOMUNI")
     ) {
-      const originalSlideXml = slideXml;
-      const komuniChunks = splitTextIntoSlideChunks(
-        mappedData.doaSesudahKomuni || "",
-        options.doaSesudahKomuniMaxChars ?? 280,
-      );
-
-      if (komuniChunks.length === 1) {
-        const filledSlide97Xml = replacePlaceholdersInXml(originalSlideXml, [
-          komuniChunks[0] || "",
-        ]);
-        zip.file(slide.fileName, filledSlide97Xml);
-      } else {
-        const slide1Xml = replacePlaceholdersInXml(originalSlideXml, [
-          komuniChunks[0],
-        ]);
-        zip.file(slide.fileName, slide1Xml);
-
-        let lastRId = slide.rId;
-        for (let i = 1; i < komuniChunks.length; i++) {
-          let dupSlideXml = originalSlideXml;
-          dupSlideXml = stripIntroParagraphs(dupSlideXml);
-
-          const filledChunkXml = replacePlaceholdersInXml(dupSlideXml, [
-            komuniChunks[i],
-          ]);
-          const { newRId } = await duplicateSlide(
-            slide.fileName,
-            lastRId,
-            filledChunkXml,
-          );
-          lastRId = newRId;
-        }
-      }
+      sequences = [[mappedData.doaSesudahKomuni || ""]];
       hasHandledDoaKomuni = true;
       hasPassedDoaKomuniTitle = false;
+    }
+
+    if (sequences?.length) {
+      // Fixed prompts and responses share the measured shape budget with
+      // its tokens. Keep their exact template text/style, once at each end.
+      const paragraphTexts = pMatches.map((paragraph) =>
+        (paragraph.match(/<a:t[^>]*>(.*?)<\/a:t>/g) || [])
+          .map((run) => run.replace(/<[^>]+>/g, ""))
+          .join(""),
+      );
+      const firstToken = paragraphTexts.findIndex((text) =>
+        /\(\s*teks\s*\)/i.test(text),
+      );
+      const lastToken = paragraphTexts.reduce(
+        (last, text, index) => (/\(\s*teks\s*\)/i.test(text) ? index : last),
+        -1,
+      );
+      const firstOnlyTexts = paragraphTexts
+        .slice(0, firstToken)
+        .filter((text) => text.trim());
+      const lastOnlyTexts = paragraphTexts
+        .slice(lastToken + 1)
+        .filter((text) => text.trim());
+      let wroteFirstPage = false;
+      let lastRId = slide.rId;
+      for (const replacements of sequences) {
+        const pages = textLayout.paginate(
+          slide.fileName,
+          slideXml,
+          "teks",
+          replacements,
+          { firstOnlyTexts, lastOnlyTexts, preserveTemplateSpacers: true },
+        );
+        for (const pageXml of pages) {
+          if (!wroteFirstPage) {
+            zip.file(slide.fileName, pageXml);
+            wroteFirstPage = true;
+          } else {
+            const duplicate = await duplicateSlide(
+              slide.fileName,
+              lastRId,
+              pageXml,
+            );
+            lastRId = duplicate.newRId;
+          }
+        }
+      }
+      await updateSlideNotes(slide.fileName, notesText);
     }
   }
 
@@ -1374,10 +611,5 @@ async function generatePPTXBufferForTemplateInternal(
 export function generatePPTXBuffer(
   mappedData: MappedLiturgyData,
 ): Promise<Buffer> {
-  return generatePPTXBufferForTemplateInternal(
-    mappedData,
-    "Template_Mingguan.pptx",
-    {},
-    true,
-  );
+  return generatePPTXBufferForTemplate(mappedData, "Template_Mingguan.pptx");
 }

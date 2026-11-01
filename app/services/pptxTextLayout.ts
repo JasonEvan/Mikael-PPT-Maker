@@ -118,6 +118,8 @@ const fontNames: Record<string, string[]> = {
   "Arial Narrow|700|normal": ["Arial Narrow Bold.ttf"],
   "Arial Narrow|400|italic": ["Arial Narrow Italic.ttf"],
   "Arial Narrow|700|italic": ["Arial Narrow Bold Italic.ttf"],
+  "Calibri|700|normal": ["Calibri Bold.ttf"],
+  "Calibri|700|italic": ["Calibri Bold Italic.ttf"],
   "Lucida Sans|700|italic": ["Lucida Sans Demibold Italic.ttf"],
   "Wingdings|400|normal": ["Wingdings.ttf"],
 };
@@ -187,10 +189,19 @@ type Line = {
   from: number;
 };
 type Shape = { raw: string; node: Xml; index: number };
+type ReplacementRun = { text: string; bold?: boolean; italic?: boolean };
+type ReplacementParagraph = {
+  bold?: boolean;
+  italic?: boolean;
+  policy?: "flow" | "last";
+} & (
+  | { text: string; runs?: never }
+  | { text?: never; runs: readonly ReplacementRun[] }
+);
 export type PptxTextReplacement =
   | string
   | {
-      paragraphs: readonly { text: string; bold?: boolean; italic?: boolean }[];
+      paragraphs: readonly ReplacementParagraph[];
       policy?: "flow" | "last";
     };
 export interface PptxTextLayout {
@@ -234,6 +245,46 @@ function normalize(value: string): string {
     .split("\n")
     .map((line) => line.replace(/[ \t\f\v]+/g, " ").replace(/^ +| +$/g, ""))
     .join("\n");
+}
+
+// Normalize a whole styled paragraph, never individual runs: a style seam is
+// not a word boundary. Keep the original face on every retained character.
+function normalizeRuns(spans: Span[]): Span[] {
+  const value = spanText(spans);
+  const result: Span[] = [];
+  const append = (span: Span) => {
+    const previous = result[result.length - 1];
+    if (
+      previous &&
+      (previous.properties === span.properties ||
+        JSON.stringify(previous.properties) === JSON.stringify(span.properties))
+    ) {
+      previous.value += span.value;
+    } else {
+      result.push(span);
+    }
+  };
+  for (const match of value.matchAll(/\r\n?|\n|[ \f\v]+|\t|[^ \f\v\t\r\n]+/g)) {
+    const start = match.index!;
+    const raw = match[0];
+    if (/^[ \f\v]+$/.test(raw)) {
+      const before = value[start - 1];
+      const after = value[start + raw.length];
+      if (!before || !after || /[\r\n\t]/.test(before + after)) continue;
+      append({
+        value: " ",
+        properties: slices(spans, start, start + 1)[0].properties,
+      });
+    } else if (raw[0] === "\r") {
+      append({
+        value: "\n",
+        properties: slices(spans, start, start + 1)[0].properties,
+      });
+    } else {
+      for (const span of slices(spans, start, start + raw.length)) append(span);
+    }
+  }
+  return result;
 }
 function placeholder(token: string): RegExp {
   return new RegExp(
@@ -794,21 +845,30 @@ export async function createPptxTextLayout(
               } else {
                 replacement.paragraphs.forEach((part, index) => {
                   if (index) flush();
-                  current.policy = replacement.policy ?? "flow";
-                  current.dynamicLast = replacement.policy === "last";
-                  const properties = clone(base);
-                  if (part.bold !== undefined)
-                    attrs(properties)["@_b"] = part.bold ? "1" : "0";
-                  if (part.italic !== undefined)
-                    attrs(properties)["@_i"] = part.italic ? "1" : "0";
-                  // Structured content can carry semantic speaker tab stops;
-                  // retain those without changing legacy string normalization.
-                  const parts = part.text
-                    .split("\t")
-                    .map(normalize)
-                    .join("\t")
-                    .split("\n\n");
-                  parts.forEach((value, partIndex) => {
+                  current.policy = part.policy ?? replacement.policy ?? "flow";
+                  current.dynamicLast = current.policy === "last";
+                  const styled = (run: ReplacementRun): Span => {
+                    const properties = clone(base);
+                    const bold = run.bold ?? part.bold;
+                    const italic = run.italic ?? part.italic;
+                    if (bold !== undefined)
+                      attrs(properties)["@_b"] = bold ? "1" : "0";
+                    if (italic !== undefined)
+                      attrs(properties)["@_i"] = italic ? "1" : "0";
+                    return { value: run.text, properties };
+                  };
+                  // Keep legacy text normalization byte-for-byte; richer input
+                  // normalizes across seams while retaining its style slices.
+                  const spans = part.runs
+                    ? normalizeRuns(part.runs.map(styled))
+                    : [
+                        styled({
+                          text: part.text.split("\t").map(normalize).join("\t"),
+                        }),
+                      ];
+                  const value = spanText(spans);
+                  let position = 0;
+                  value.split("\n\n").forEach((segment, partIndex) => {
                     if (partIndex) {
                       const policy = current.policy;
                       const dynamicLast = current.dynamicLast;
@@ -816,7 +876,17 @@ export async function createPptxTextLayout(
                       current.policy = policy;
                       current.dynamicLast = dynamicLast;
                     }
-                    current.spans.push({ value, properties });
+                    const segmentSpans = slices(
+                      spans,
+                      position,
+                      position + segment.length,
+                    );
+                    current.spans.push(
+                      ...(segmentSpans.length
+                        ? segmentSpans
+                        : [styled({ text: "" })]),
+                    );
+                    position += segment.length + 2;
                   });
                 });
               }

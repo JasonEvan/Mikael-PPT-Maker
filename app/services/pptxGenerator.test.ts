@@ -12,6 +12,7 @@ import {
 import type { MappedLiturgyData } from "../utils/docxParser";
 
 type Node = Record<string, unknown>;
+type Slide = { file: string; xml: string; nodes: Node[]; text: string };
 const parser = new XMLParser({
   preserveOrder: true,
   ignoreAttributes: false,
@@ -300,35 +301,480 @@ test("weekly metadata and intentions retain template faces, weights, response st
   }
 });
 
-test("both OBS exports remain independent of weekly and English font provisioning", async () => {
-  const beforeIndonesian = process.env.INDONESIAN_MASS_FONT_DIR;
-  const beforeEnglish = process.env.ENGLISH_MASS_FONT_DIR;
-  process.env.INDONESIAN_MASS_FONT_DIR = "/nonexistent-licensed-weekly-fonts";
-  process.env.ENGLISH_MASS_FONT_DIR = "/nonexistent-licensed-english-fonts";
+const obsGenerators = [
+  ["Hijau", generatePPTXOBSBuffer],
+  ["Kuning", generatePPTXOBSKuningBuffer],
+] as const;
+
+async function obsTemplate(color: string) {
+  const source = await presentation(
+    await fs.readFile(
+      path.join(process.cwd(), `app/template/Template_PPT_OBS_${color}.pptx`),
+    ),
+  );
+  const placeholders = (slide: (typeof source.slides)[number]) =>
+    find(slide.nodes, "a:p").filter((p) => /\(\s*teks\s*\)/i.test(text([p])))
+      .length;
+  const seruanTitle = source.slides.findIndex((slide) =>
+    slide.text.includes("SERUAN TOBAT"),
+  );
+  const seruan = source.slides
+    .slice(seruanTitle + 1)
+    .filter((slide) => placeholders(slide) === 1)
+    .slice(0, 3);
+  const umatTitle = source.slides.findIndex((slide) =>
+    slide.text.includes("DOA UMAT"),
+  );
+  const umat = source.slides
+    .slice(umatTitle + 1)
+    .filter((slide) => placeholders(slide) === 1)
+    .slice(0, 3);
+  const gospelIntro = source.slides.findIndex((slide) =>
+    /Inilah Injil suci menurut/i.test(slide.text),
+  );
+  return {
+    ...source,
+    seruan,
+    umat,
+    metadata: [
+      source.slides.find(
+        (slide) => slide.text.includes("BACAAN PERTAMA") && placeholders(slide),
+      )!,
+      source.slides.find(
+        (slide) => slide.text.includes("BACAAN KEDUA") && placeholders(slide),
+      )!,
+      source.slides
+        .slice(gospelIntro + 1)
+        .find((slide) => placeholders(slide) === 2)!,
+    ],
+  };
+}
+
+async function slideNotes(zip: JSZip, file: string) {
+  const relFile = zip.file(
+    path.posix.join(
+      path.posix.dirname(file),
+      "_rels",
+      `${path.posix.basename(file)}.rels`,
+    ),
+  );
+  if (!relFile) return undefined;
+  const rel = find(
+    parser.parse(await relFile.async("text")) as Node[],
+    "Relationship",
+  ).find((node) => attributes(node)["@_Type"].endsWith("/notesSlide"));
+  if (!rel) return undefined;
+  const target = path.posix.normalize(
+    path.posix.join(path.posix.dirname(file), attributes(rel)["@_Target"]),
+  );
+  return text(parser.parse(await zip.file(target)!.async("text")) as Node[]);
+}
+
+function obsDynamicText(
+  slides: readonly Slide[],
+  source: { slides: readonly Slide[] },
+): string {
+  const editedShapes = new Map(
+    source.slides.map((slide) => [
+      attributes(find(slide.nodes, "p14:creationId")[0])["@_val"],
+      find(slide.nodes, "p:sp").flatMap((shape, index) =>
+        /\(\s*teks\s*\)/i.test(text([shape])) ? [index] : [],
+      ),
+    ]),
+  );
+  return slides
+    .flatMap((slide) => {
+      const indices =
+        editedShapes.get(
+          attributes(find(slide.nodes, "p14:creationId")[0])["@_val"],
+        ) ?? [];
+      const shapes = find(slide.nodes, "p:sp");
+      return indices.map((index) => text([shapes[index]]));
+    })
+    .join("");
+}
+
+test("both OBS exports require provisioned Indonesian fonts rather than silently substituting", async () => {
+  const previous = process.env.INDONESIAN_MASS_FONT_DIR;
+  process.env.INDONESIAN_MASS_FONT_DIR =
+    "/nonexistent-licensed-indonesian-fonts";
   try {
-    for (const generate of [
-      generatePPTXOBSBuffer,
-      generatePPTXOBSKuningBuffer,
-    ]) {
-      const { zip, slides } = await presentation(await generate(mapped()));
-      const visible = compact(slides.map((slide) => slide.text).join(""));
-      assert.ok(visible.includes("KOLEKTA_AWAL"));
-      assert.ok(visible.includes("Kabulkanlahpermohonanpertamakami."));
-      assert.ok(!visible.includes("NOTES_PERTAMA"));
-      const noteBodies = await Promise.all(
+    for (const [, generate] of obsGenerators) {
+      await assert.rejects(
+        generate(mapped()),
+        /Indonesian Mass layout requires the exact licensed .*INDONESIAN_MASS_FONT_DIR.*Font substitution is disabled/,
+      );
+    }
+  } finally {
+    if (previous === undefined) delete process.env.INDONESIAN_MASS_FONT_DIR;
+    else process.env.INDONESIAN_MASS_FONT_DIR = previous;
+  }
+});
+
+for (const [color, generate] of obsGenerators) {
+  test(`OBS ${color} measures every role, keeps complete source/order and original scripture notes ownership`, async () => {
+    const data = mapped(true);
+    data.bacaanKedua!.epigraph = `EPIGRAF_KEDUA_AWAL ${"Kita akan melihat Allah dalam kasih. ".repeat(18)} EPIGRAF_KEDUA_AKHIR`;
+    data.bacaanInjil!.epigraph = `EPIGRAF_INJIL_AWAL ${"Berbahagialah kamu yang membawa damai. ".repeat(18)} EPIGRAF_INJIL_AKHIR`;
+    const source = await obsTemplate(color);
+    const { zip, slides } = await presentation(await generate(data));
+    const visible = compact(obsDynamicText(slides, source));
+    const values = [
+      ...data.seruanTobat!,
+      data.doaKolekta!,
+      data.bacaanPertama!.epigraph!,
+      data.bacaanPertama!.citation!,
+      ...data.mazmurTanggapan!.verses,
+      data.bacaanKedua!.epigraph!,
+      data.bacaanKedua!.citation!,
+      data.bacaanInjil!.epigraph!,
+      "Matius 5:1-12",
+      data.doaUmat!.intro!,
+      ...data.doaUmat!.intentions.flatMap((item) => [
+        item.title,
+        item.body,
+        item.response!,
+      ]),
+      data.doaUmat!.closing!,
+      data.doaAtasPersembahan!,
+      data.doaSesudahKomuni!,
+    ];
+    let previous = -1;
+    for (const value of values) {
+      const normalized = compact(value);
+      const start = visible.indexOf(normalized);
+      assert.ok(
+        start > previous,
+        `complete source in liturgical order: ${value.slice(0, 45)}`,
+      );
+      previous = start;
+      const marker = value.match(/^\w+_AWAL/)?.[0];
+      if (marker)
+        assert.equal(
+          visible.split(marker).length - 1,
+          1,
+          `${marker} appears once`,
+        );
+    }
+    assert.ok(
+      !visible.includes("InjilSucimenurutMatius5:1-12"),
+      "OBS citation omits its already spoken prefix",
+    );
+    const intro = slides.find((slide) =>
+      /Inilah Injil suci menurut/i.test(slide.text),
+    )!;
+    assert.ok(
+      intro.text.includes("Matius"),
+      "Gospel name fills the intro rather than metadata",
+    );
+    for (let index = 0; index < source.seruan.length; index++) {
+      const original = source.seruan[index];
+      const response =
+        source.slides[
+          source.slides.findIndex((slide) => slide.file === original.file) + 1
+        ];
+      const responseIndex = slides.findIndex(
+        (slide) => slide.file === response.file,
+      );
+      const endIndex = slides.findIndex((slide) =>
+        slide.text.includes(`SERUAN_${["SATU", "DUA", "TIGA"][index]}_AKHIR`),
+      );
+      assert.ok(
+        endIndex < responseIndex,
+        "separate fixed Seruan response follows every invocation continuation",
+      );
+      assert.equal(
+        slides[responseIndex].xml,
+        response.xml,
+        "fixed response slide stays untouched",
+      );
+      if (index < 2) {
+        assert.ok(
+          responseIndex <
+            slides.findIndex(
+              (slide) => slide.file === source.seruan[index + 1].file,
+            ),
+        );
+      }
+    }
+    for (const [index, reading] of [
+      data.bacaanPertama!,
+      data.bacaanKedua!,
+      data.bacaanInjil!,
+    ].entries()) {
+      assert.ok(
+        !visible.includes(compact(reading.notesBody!)),
+        "scripture is notes-only",
+      );
+      assert.ok(
+        compact((await slideNotes(zip, source.metadata[index].file))!).includes(
+          compact(reading.notesBody!),
+        ),
+      );
+      const notes = await Promise.all(
         Object.values(zip.files)
           .filter((file) =>
             /^ppt\/notesSlides\/notesSlide\d+\.xml$/.test(file.name),
           )
-          .map(async (file) => file.async("text")),
+          .map(async (file) =>
+            text(parser.parse(await file.async("text")) as Node[]),
+          ),
       );
-      assert.ok(noteBodies.some((note) => note.includes("NOTES_PERTAMA")));
+      assert.equal(
+        notes.filter((note) =>
+          compact(note).includes(compact(reading.notesBody!)),
+        ).length,
+        1,
+      );
     }
-  } finally {
-    if (beforeIndonesian === undefined)
-      delete process.env.INDONESIAN_MASS_FONT_DIR;
-    else process.env.INDONESIAN_MASS_FONT_DIR = beforeIndonesian;
-    if (beforeEnglish === undefined) delete process.env.ENGLISH_MASS_FONT_DIR;
-    else process.env.ENGLISH_MASS_FONT_DIR = beforeEnglish;
-  }
-});
+    const originalFiles = new Set(source.slides.map((slide) => slide.file));
+    for (const clone of slides.filter(
+      (slide) => !originalFiles.has(slide.file),
+    )) {
+      assert.equal(
+        await slideNotes(zip, clone.file),
+        undefined,
+        "continuations never share original notes",
+      );
+    }
+    const ids = find(
+      parser.parse(
+        await zip.file("ppt/presentation.xml")!.async("text"),
+      ) as Node[],
+      "p:sldId",
+    );
+    for (const key of ["@_id", "@_r:id"]) {
+      assert.equal(
+        new Set(ids.map((node) => attributes(node)[key])).size,
+        ids.length,
+      );
+    }
+    const firstIntentionEnd = slides.findIndex((slide) =>
+      slide.text.includes("INTENSI_SATU_AKHIR"),
+    );
+    const firstResponse = slides.findIndex((slide) =>
+      slide.text.includes("Kabulkanlah permohonan pertama"),
+    );
+    const nextIntention = slides.findIndex((slide) =>
+      slide.text.includes("Bagi keluarga"),
+    );
+    assert.ok(
+      firstIntentionEnd <= firstResponse && firstResponse < nextIntention,
+      "each intention response follows its whole body before the next intention",
+    );
+    assert.ok(
+      !slides[firstResponse].text.includes("Bagi keluarga"),
+      "next intention never packs into response space",
+    );
+  });
+
+  test(`OBS ${color} preserves inline emphasis seams, title breaks, token styling and regular U-tab responses`, async () => {
+    const data = mapped();
+    data.doaUmat!.intentions = [
+      {
+        title: "",
+        body: "Bagi Gereja. Semoga damai.",
+        response: "Dengarkanlah kami.",
+      },
+      {
+        title: "Bagi keluarga",
+        body: "Semoga rukun.",
+        response: "Bimbinglah kami.",
+      },
+    ];
+    const source = await obsTemplate(color);
+    const { slides } = await presentation(await generate(data));
+    const token = find(source.umat[1].nodes, "a:p").find((p) =>
+      /\(\s*teks\s*\)/i.test(text([p])),
+    )!;
+    const base = find([token], "a:rPr")[0];
+    for (const [label, remainder, responseText] of [
+      ["Bagi Gereja.", " Semoga damai.", "U\tDengarkanlah kami."],
+      ["Bagi keluarga", "Semoga rukun.", "U\tBimbinglah kami."],
+    ]) {
+      const page = slides.find((slide) => slide.text.includes(label))!;
+      const runs = find(page.nodes, "a:r");
+      const combined = runs.map((run) => text([run])).join("");
+      const assertStyle = (value: string, bold: string) => {
+        const start = combined.indexOf(value);
+        assert.ok(start >= 0, `missing intention text: ${value}`);
+        let offset = 0;
+        for (const run of runs) {
+          const end = offset + text([run]).length;
+          if (end > start && offset < start + value.length) {
+            const properties = find([run], "a:rPr")[0];
+            assert.equal(attributes(properties)["@_b"], bold);
+            assert.equal(
+              attributes(properties)["@_sz"],
+              attributes(base)["@_sz"],
+            );
+            assert.equal(
+              attributes(properties)["@_i"] ?? "0",
+              attributes(base)["@_i"] ?? "0",
+            );
+            assert.deepEqual(
+              find([properties], "a:solidFill"),
+              find([base], "a:solidFill"),
+            );
+            assert.deepEqual(
+              find([properties], "a:latin"),
+              find([base], "a:latin"),
+            );
+          }
+          offset = end;
+        }
+      };
+      assertStyle(label, "1");
+      assertStyle(remainder.trim(), "0");
+      assertStyle(responseText, "0");
+      const bodyParagraph = find(page.nodes, "a:p").find((p) =>
+        text([p]).includes(label),
+      )!;
+      assert.ok(
+        text([bodyParagraph]).includes(`${label}${remainder}`),
+        "inline seam retains original whitespace",
+      );
+      if (label === "Bagi keluarga") {
+        assert.ok(
+          find([bodyParagraph], "a:br").length > 0,
+          "title/body LF is a hard break, not a forced extra paragraph",
+        );
+      }
+    }
+  });
+
+  test(`OBS ${color} paginates an oversized single-token response only after the complete body`, async () => {
+    const data = mapped();
+    const response = `RESPONS_RAKSASA_AWAL ${"Dengarkanlah dan bimbinglah kami dalam kasih. ".repeat(90)} RESPONS_RAKSASA_AKHIR`;
+    const source = await obsTemplate(color);
+    data.doaUmat!.intentions = [
+      {
+        title: "Untuk sesama",
+        body: "Doa ini berakhir pada BATAS_TUBUH.",
+        response,
+      },
+      { title: "INTENSI_BERIKUTNYA", body: "Semoga damai." },
+    ];
+    const { slides } = await presentation(await generate(data));
+    const visible = compact(obsDynamicText(slides, source));
+    assert.ok(
+      visible.includes(compact(response)),
+      "oversized response loses no source characters",
+    );
+    assert.ok(
+      visible.indexOf("BATAS_TUBUH.") < visible.indexOf("RESPONS_RAKSASA_AWAL"),
+    );
+    assert.ok(
+      visible.indexOf("RESPONS_RAKSASA_AKHIR") <
+        visible.indexOf("INTENSI_BERIKUTNYA"),
+    );
+    const responseStart = slides.findIndex((slide) =>
+      slide.text.includes("RESPONS_RAKSASA_AWAL"),
+    );
+    const responseEnd = slides.findIndex((slide) =>
+      slide.text.includes("RESPONS_RAKSASA_AKHIR"),
+    );
+    assert.ok(
+      responseEnd > responseStart,
+      "response itself spans measured slides",
+    );
+    assert.equal(
+      slides
+        .slice(responseStart, responseEnd + 1)
+        .map((slide) => slide.text)
+        .join("")
+        .split("U\t").length - 1,
+      1,
+    );
+    for (const slide of slides.slice(responseStart, responseEnd + 1)) {
+      for (const run of find(slide.nodes, "a:r").filter((run) =>
+        /Dengarkanlah|RESPONS_RAKSASA/.test(text([run])),
+      )) {
+        assert.equal(attributes(find([run], "a:rPr")[0])["@_b"], "0");
+      }
+    }
+  });
+
+  test(`OBS ${color} consumes empty and missing anonymous roles without repeating Seruan or stealing later prayers`, async () => {
+    const source = await obsTemplate(color);
+    for (const umat of [
+      undefined,
+      { intro: "", intentions: [], closing: "" },
+      {
+        intro: "",
+        intentions: [{ title: "", body: "INTENSI_TANPA_PENGANTAR" }],
+        closing: "PENUTUP_SETELAH_KOSONG",
+      },
+    ]) {
+      const data: MappedLiturgyData = {
+        unmatchedSections: [],
+        seruanTobat: ["SERUAN_TUNGGAL"],
+        mazmurTanggapan: { verses: [] },
+        doaUmat: umat,
+        doaAtasPersembahan: "PERSEMBAHAN_TETAP",
+        doaSesudahKomuni: "KOMUNI_TETAP",
+      };
+      const { slides } = await presentation(await generate(data));
+      const visible = slides.map((slide) => slide.text).join("");
+      assert.equal(visible.split("SERUAN_TUNGGAL").length - 1, 1);
+      for (const original of source.seruan.slice(1)) {
+        assert.ok(
+          !/\(\s*teks\s*\)/i.test(
+            slides.find((slide) => slide.file === original.file)!.text,
+          ),
+          "missing Seruan entry is cleared, not repeated",
+        );
+      }
+      for (const original of [...source.umat, ...source.metadata]) {
+        assert.ok(
+          !/\(\s*teks\s*\)/i.test(
+            slides.find((slide) => slide.file === original.file)!.text,
+          ),
+          "empty anonymous role is consumed",
+        );
+      }
+      const offering = slides.find((slide) =>
+        slide.text.includes("PERSEMBAHAN_TETAP"),
+      )!;
+      const communion = slides.find((slide) =>
+        slide.text.includes("KOMUNI_TETAP"),
+      )!;
+      assert.ok(offering.text.includes("ATAS PERSEMBAHAN"));
+      assert.ok(communion.text.includes("SESUDAH KOMUNI"));
+      if (umat?.intentions.length) {
+        assert.ok(visible.includes("INTENSI_TANPA_PENGANTAR"));
+        assert.ok(visible.includes("PENUTUP_SETELAH_KOSONG"));
+      }
+      const firstReading = source.slides.findIndex(
+        (slide) => slide.file === source.metadata[0].file,
+      );
+      const secondReading = source.slides.findIndex(
+        (slide) => slide.file === source.metadata[1].file,
+      );
+      const psalm = source.slides
+        .slice(firstReading + 1, secondReading)
+        .find((slide) => /\(\s*teks\s*\)/i.test(slide.text))!;
+      assert.equal(
+        slides.find((slide) => slide.file === psalm.file)!.xml,
+        psalm.xml,
+        "zero verses preserve the original psalm placeholder",
+      );
+      const untouched = source.slides.filter(
+        (slide) =>
+          /\(\s*teks\s*\)/i.test(slide.text) &&
+          ![...source.seruan, ...source.umat, ...source.metadata].some(
+            (role) => role.file === slide.file,
+          ) &&
+          !/KOLEKTA|PERSEMBAHAN|KOMUNI|Inilah Injil/i.test(slide.text) &&
+          slide.file !== psalm.file,
+      );
+      for (const original of untouched) {
+        assert.equal(
+          slides.find((slide) => slide.file === original.file)!.xml,
+          original.xml,
+          "unrelated placeholders remain untouched",
+        );
+      }
+    }
+  });
+}

@@ -10,20 +10,20 @@ hardcoded slide indices.
 | Entry point                   | Template                       | Text layout                         |
 | ----------------------------- | ------------------------------ | ----------------------------------- |
 | `generatePPTXBuffer`          | `Template_Mingguan.pptx`       | Measured weekly layout              |
-| `generatePPTXOBSBuffer`       | `Template_PPT_OBS_Hijau.pptx`  | Existing OBS character-based layout |
-| `generatePPTXOBSKuningBuffer` | `Template_PPT_OBS_Kuning.pptx` | Existing OBS character-based layout |
+| `generatePPTXOBSBuffer`       | `Template_PPT_OBS_Hijau.pptx`  | Measured OBS layout                 |
+| `generatePPTXOBSKuningBuffer` | `Template_PPT_OBS_Kuning.pptx` | Measured OBS layout                 |
 
-`generatePPTXBufferForTemplate` remains the legacy public template entry point
-used by OBS. Only the weekly wrapper selects the private measured mode in
-`pptxGenerator.ts`. OBS does not initialize the measured layout/font profile.
-English uses the same measurement implementation, but retains its own generator,
+`generatePPTXBufferForTemplate` is the sole shared Indonesian implementation.
+Weekly and both OBS wrappers use measured layout with the Indonesian font
+profile. No character-count pagination or legacy fallback remains.
+English shares the measurement engine while retaining its own generator,
 content mapping, font profile, and pagination policies.
 
 The API selects the weekly wrapper only for `template: "mingguan"`. Its existing
 OBS/default routing and English early dispatch remain unchanged. DOCX parsing,
 UI, and the `MappedLiturgyData` contract are unchanged.
 
-## 2. Weekly measured layout
+## 2. Shared Indonesian measured layout
 
 `pptxTextLayout.ts` owns DrawingML measurement and pagination. The generator owns
 liturgy mapping, static first/final content policy, notes, and ZIP assembly.
@@ -34,7 +34,7 @@ liturgy mapping, static first/final content policy, notes, and ZIP assembly.
   Skia Canvas. All paragraphs sharing a shape use one height budget, including
   fixed headings, labels, tab stops, responses, and symbols.
 - Preserve intended point sizes. Do not use character budgets, clipping, or
-  viewer AutoFit to make weekly content fit.
+  viewer AutoFit to make content fit.
 - Preserve template spacer paragraphs first. If the complete edited shape is
   too tall, remove template blanks one at a time, reducing repeated gaps first,
   until it fits or no removable spacers remain. Source paragraph/hard breaks
@@ -52,6 +52,14 @@ String replacements retain the established normalization of ordinary horizontal
 whitespace and CRLF. Structured paragraphs additionally retain semantic tabs,
 including the congregational `U\t` label. Nonbreaking spaces and grapheme
 boundaries are retained by the shared engine's wrapping rules.
+
+Structured paragraphs accept either `text` or inline `runs` with bold/italic
+overrides inherited from the original token. Rich-run whitespace is normalized
+across style seams without joining words; adjacent matching styles are coalesced.
+An optional paragraph `policy: "last"` overrides the replacement-level policy,
+allowing a same-token response to use the existing final-page reservation and
+oversized-response flow. Existing string and structured-text defaults retain
+their established behavior.
 
 ## 3. Weekly section mapping
 
@@ -82,7 +90,7 @@ The response retains its separate token's italic/color properties and `U\t` labe
 A fitting response is scheduled at the end, carrying a tail body line with it
 when possible. A response larger than an entire page is ordered content after
 the complete body and may span final pages; it is never dropped or shrunk.
-There is no weekly combined-character threshold or 35%-length sentence heuristic.
+There is no combined-character threshold or length-based sentence-fit heuristic.
 
 ### Missing content and excluded slides
 
@@ -99,7 +107,7 @@ fixed template sequence; new placeholder slides in that interval need review.
 ## 4. Speaker notes and slide-package integrity
 
 The complete scripture bodies remain **speaker notes only**. Do not borrow
-English's visible reading-body pagination for the Indonesian template.
+English's visible reading-body pagination for the Indonesian templates.
 
 `updateSlideNotes` follows each original slide's own `notesSlide` relationship
 and normalizes its target path. It does not assume `notesSlide2/3/6.xml` or matching
@@ -116,7 +124,7 @@ Every continuation uses the existing `duplicateSlide` machinery:
 - Keep complete scripture notes attached to the original metadata slide, not
   shared between multiple slides.
 
-## 5. Exact weekly fonts and deployment
+## 5. Exact fonts and deployment
 
 The current weekly template requires Arial regular/bold/italic, Arial Narrow
 regular/bold/italic variants, Lucida Sans bold italic, and Wingdings. Headings
@@ -129,10 +137,10 @@ DrawingML run requests bold. The engine verifies that exact face instead of
 synthesizing weight700 or replacing the family. Symbol runs retain their source
 `a:sym` and glyph; measurement selects the symbol face.
 
-Both measured generators load the exact bundled `.ttf` files in `app/fonts/pptx`
+All measured generators load the exact bundled `.ttf` files in `app/fonts/pptx`
 by default. There is no default search of macOS Office/system/user directories.
 The shared bundle includes Arial, Arial Narrow, Book Antiqua, Arial Rounded MT
-Bold, Lucida Sans demibold italic, and Wingdings. Optional
+Bold, Lucida Sans demibold italic, Wingdings, and Calibri Bold/Bold Italic. Optional
 `INDONESIAN_MASS_FONT_DIR` and `ENGLISH_MASS_FONT_DIR` overrides are exclusive:
 remove obsolete Mac-specific values from Vercel to use the bundle.
 
@@ -141,7 +149,9 @@ PPTX. Presentation computers still need matching fonts. Deployment and
 redistribution must comply with the proprietary font licenses.
 Next externalizes `skia-canvas` and traces `app/fonts/pptx/*.ttf` and templates.
 Install native and optional dependencies for the deployment OS/architecture.
-OBS generation itself remains independent of font measurement.
+OBS now requires the exact Indonesian-profile faces, including Calibri inherited
+by lower-third text from the template's theme. Missing fonts fail explicitly;
+OBS does not substitute Arial for Calibri or bypass measurement.
 
 The download route uses the Node.js runtime and returns a `ReadableStream`
 for every template. It emits buffer views in chunks of at most 64KiB per pull,
@@ -151,14 +161,33 @@ The browser's existing `response.blob()` download flow remains valid.
 This is transport streaming: ZIP generation still finishes in memory first.
 Verify response streaming on a Vercel preview as well as locally.
 
-## 6. OBS remains legacy
+## 6. OBS-specific mapping and appearance
 
-Both OBS wrappers still call `generatePPTXBufferForTemplate` with their existing
-structural flags and limits: Kolekta200, one-placeholder intentions210, and
-postcommunion210 characters. Existing shared legacy branches retain their other
-260/240/250 heuristics where applicable, placeholder-only Seruan/Gospel mapping,
-one-placeholder intention bolding, response placement, and notes handling.
-Those helpers remain live OBS code; they are not weekly fallback paths.
+Hijau and Kuning use the same role rules, but their slide counts, positions,
+font sizes, spacing and notes relationships differ. Read each original template,
+not a color-swapped copy or a shared set of numerical slide indices.
+
+- After `SERUAN TOBAT`, consume the first three eligible placeholder-only slides
+  in order. Missing invocations clear their own slot without repeating the first.
+  Each invocation's continuations precede its existing separate response slide.
+- The Gospel introduction takes `gospelName`. Its following anonymous two-token
+  metadata slide takes epigraph and source, omitting the already-spoken citation
+  prefix. Complete scripture notes belong to that metadata slide only.
+- Doa Umat uses three successive one-placeholder roles: introduction, intentions,
+  closing. Empty content still advances the role state. Each intention uses one
+  rich replacement: initial sentence/title-line emphasis, regular remainder,
+  then a regular `U\t` response with paragraph-level last policy.
+- Retain the OBS token's face, size, fill and italic settings. Do not impose the
+  weekly separate response token's color/italic style. Inline emphasis never
+  removes the separating space or forces an additional paragraph.
+- Measure lower-third boxes and full-content boxes independently from actual
+  geometry, insets and paragraph spacing. Keep template gaps first, then remove
+  only decorative blanks if necessary before paginating. Fixed prompts and
+  same-shape final responses share this budget; separate fixed slides/shapes
+  are not moved into a dynamic text box.
+- Preserve backgrounds, artwork, untouched shapes, hidden slides, excluded
+  placeholders and original notes ownership. No legacy replacement, character
+  budgets, sentence-tail fit heuristic or measured/legacy mode switch remains.
 
 ## 7. Verification
 
@@ -170,8 +199,9 @@ Those helpers remain live OBS code; they are not weekly fallback paths.
 Use exact licensed fonts for full acceptance. Check source-text conservation and
 order, mixed fonts/sizes/symbols, rich intention typography, final responses,
 spacer-first fitting, long responses, notes-only scripture, and valid package
-relationships. Compare representative short/long OBS and English logical ZIP
-part contents before/after shared changes, not timestamp-sensitive ZIP bytes.
-Render weekly short/stress exports in Microsoft PowerPoint and inspect edited
-first/middle/final pages, icons, responses, spacing, and glyph bounds. Skia model
-bounds alone are not a claim of identical rendering in every Office viewer.
+relationships. Compare short/long weekly and English logical ZIP-part contents
+before/after shared changes, not timestamp-sensitive ZIP bytes. Exercise both
+OBS colors with long text, inline emphasis, oversized responses and absent data.
+Render short/stress exports in Microsoft PowerPoint and inspect edited
+first/middle/final pages against their text-box frames, not only slide edges.
+Skia model bounds alone are not a claim of identical rendering in every viewer.

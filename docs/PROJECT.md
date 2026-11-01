@@ -175,8 +175,8 @@ missing sections should be visibly flagged in the preview, not hidden.
 - All English dynamic text destinations use the shared `pptxTextLayout.ts`:
   song titles, reading introductions/bodies, psalm verses/refrains, acclamation,
   prayers, intercessions, Kyrie, and homily. There are no character-budget
-  pagination limits in this English export path. Indonesian weekly now also
-  uses measured layout; OBS Hijau/Kuning deliberately retain legacy pagination.
+  pagination limits in this English export path. Indonesian weekly and both
+  OBS variants use the same measured engine with their own template geometry.
 - Layout is measured with Skia Canvas and the exact template fonts. The engine
   resolves text-box extents/insets and inherited paragraph/run properties,
   budgets all paragraphs sharing a shape together, and fills pages with measured
@@ -199,14 +199,14 @@ missing sections should be visibly flagged in the preview, not hidden.
 ### Required licensed fonts
 
 The server bundles the exact template font files in `app/fonts/pptx`, shared by
-English Mass and Indonesian weekly generation. These are server-only assets,
+English Mass, Indonesian weekly, and OBS generation. These are server-only assets,
 not files in `public/`, and are not embedded in generated presentations.
 Presentation computers still need the same fonts. Bundling does not grant new
 font rights: deployment and redistribution must comply with the font licenses.
 
 - The bundle contains Arial and Arial Narrow regular/bold/italic/bold italic,
   Book Antiqua regular/bold/italic/bold italic, Arial Rounded MT Bold,
-  Lucida Sans demibold italic, and Wingdings.
+  Lucida Sans demibold italic, Wingdings, and Calibri bold/bold italic for OBS.
 - By default, only `app/fonts/pptx` is searched. Generation does not depend on a
   developer's Office installation, macOS system fonts, or the user's home folder.
 - Optional `ENGLISH_MASS_FONT_DIR` and `INDONESIAN_MASS_FONT_DIR` overrides remain
@@ -250,9 +250,8 @@ first/middle/final pages.
 
 ## Indonesian weekly: measured layout
 
-- `generatePPTXBuffer` selects measured Indonesian layout in the existing
-  generator. The public template entry point used by OBS retains the legacy
-  mode; the API, parser, UI, and OBS wrappers are unchanged.
+- `generatePPTXBuffer` uses the shared measured Indonesian template generator,
+  as do both OBS wrappers. The API, parser, UI, and streaming route are unchanged.
 - Every existing weekly dynamic role is measured, including previously
   unbounded Seruan Tobat, reading metadata, Gospel-name dialogue, and psalm
   verses. Legacy character budgets and combined-response thresholds do not
@@ -275,5 +274,34 @@ first/middle/final pages.
   in the generated presentation; presentation computers need the same faces.
 - Run `npm run test:pptx` for all generator/shared-engine regressions, or
   `npm run test:indonesian` for weekly/OBS plus shared layout. Full acceptance
-  requires both English and weekly fonts, logical ZIP-part equivalence for
-  unchanged OBS/English scenarios, and Microsoft PowerPoint render inspection.
+  requires exact bundled fonts, logical ZIP-part equivalence for unchanged
+  weekly/English fixtures during shared-engine changes, and PowerPoint inspection.
+
+## Indonesian OBS: measured layout
+
+- Both Hijau and Kuning use the shared Skia layout, with no character-count
+  fitting path. Their source templates are retained independently: they differ
+  in slide ordering, paragraph spacing and some font sizes, not only color.
+- Seruan Tobat invocation-only slides use lower-third geometry; each invocation
+  finishes before its existing separate congregation-response slide. Gospel
+  metadata follows its introduction even though its own slide has no section
+  label. Gospel citation prefix omission remains OBS-specific.
+- Single-token intentions preserve the initial sentence/title-line emphasis,
+  regular remainder and regular tabbed response, inheriting the OBS font/fill
+  rather than weekly response styling. Inline runs preserve word separation and
+  hard breaks. A fitting response is reserved for the end; an oversized response
+  flows after the complete body without loss. Each intention/bait is independent.
+- The engine supports per-paragraph flow/last policy within a rich replacement.
+  Empty roles still advance the Doa Umat state; missing Seruan entries do not
+  repeat the first invocation. Existing zero-verse and excluded-placeholder
+  behavior is retained.
+- Calibri Bold and Bold Italic are bundled in `app/fonts/pptx` and traced with
+  the other exact faces. OBS now requires Indonesian-profile fonts; it no longer
+  succeeds by bypassing measurement when that font directory is invalid.
+- Scripture stays in original metadata notes resolved through relationships.
+  Continuation slides keep artwork/layout/media but do not share scripture
+  notes. Fixed content and original hidden-slide state are preserved.
+- Regression coverage exercises both colors, every dynamic role, complete
+  source/order, inline typography, giant responses, empty-state routing and
+  notes ownership. Validate rendered glyphs against text-box frames in PowerPoint
+  and check default/explicit OBS downloads on the production build.
