@@ -5,8 +5,7 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     "/api/generate-pptx": [
       "./app/template/*.pptx",
-      "./app/fonts/english-mass/**/*",
-      "./app/fonts/indonesian-mass/**/*",
+      "./app/fonts/pptx/*.ttf",
     ],
   },
 };

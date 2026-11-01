@@ -198,36 +198,50 @@ missing sections should be visibly flagged in the preview, not hidden.
 
 ### Required licensed fonts
 
-Provision the template fonts on the generation server **and** on the computer
-displaying the downloaded deck. Fonts are not embedded or redistributed by this
-repository. The normal English template needs Arial bold/bold italic,
-Book Antiqua bold italic, and Arial Rounded MT Bold. Supply other exact styles
-if the template is changed to use them.
+The server bundles the exact template font files in `app/fonts/pptx`, shared by
+English Mass and Indonesian weekly generation. These are server-only assets,
+not files in `public/`, and are not embedded in generated presentations.
+Presentation computers still need the same fonts. Bundling does not grant new
+font rights: deployment and redistribution must comply with the font licenses.
 
-- Set `ENGLISH_MASS_FONT_DIR` to a directory of licensed `.ttf` files. When set,
-  only that directory is searched; an invalid configuration never falls back to
-  a different system font.
-- Recognized names include `arialbd.ttf` / `Arial Bold.ttf`,
-  `arialbi.ttf` / `Arial Bold Italic.ttf`, `Book Antiqua Bold Italic.ttf`, and
-  `ArialRoundedMTBold.ttf` / `Arial Rounded Bold.ttf`. Internal font metadata is
-  checked too; renaming a substitute font is not supported.
-- Without the environment variable, the engine searches `app/fonts/english-mass`
-  and the standard macOS Office/system/user font directories. This supports local
-  Office installations without copying proprietary font files into the repo.
+- The bundle contains Arial and Arial Narrow regular/bold/italic/bold italic,
+  Book Antiqua regular/bold/italic/bold italic, Arial Rounded MT Bold,
+  Lucida Sans demibold italic, and Wingdings.
+- By default, only `app/fonts/pptx` is searched. Generation does not depend on a
+  developer's Office installation, macOS system fonts, or the user's home folder.
+- Optional `ENGLISH_MASS_FONT_DIR` and `INDONESIAN_MASS_FONT_DIR` overrides remain
+  exclusive. Remove old deployment values pointing at local Mac paths to use
+  bundled assets. No font-directory environment variable is needed by default.
+- Internal family, weight, and italic metadata are verified; renaming a
+  substitute font is not supported.
 - Next externalizes `skia-canvas` and traces the PPTX templates plus
-  `app/fonts/english-mass/**/*`. For other deployments, install the native
-  dependency for the target OS/architecture and mount/provision the font directory
-  at runtime. Do not reuse a macOS native dependency installation on Linux.
+  `app/fonts/pptx/*.ttf`. Vercel builds must install native dependencies for their
+  target OS/architecture, including optional dependencies. Do not deploy a
+  `node_modules` directory copied from macOS to Linux.
+
+### Streaming downloads on Vercel
+
+`/api/generate-pptx` explicitly uses the Node.js runtime and returns PPTX files
+through a backpressure-driven `ReadableStream` for all templates, including OBS
+and English. The response emits at most 64KiB per pull using buffer views,
+without a second full-file copy or a `Content-Length` header. Filenames, MIME
+type, error responses, and the existing browser `response.blob()` flow remain
+compatible. Streaming avoids the non-streaming response payload limit; it does
+not change ZIP generation, which still finishes in memory before download starts.
+
+Deploy the font assets with the application and verify the download on a Vercel
+preview. A local production build proves packaging and HTTP streaming locally,
+not execution inside Vercel.
 
 ### Verification
 
-Run `npm run test:english` with the licensed fonts provisioned. The layout suite
-covers proportional font widths, shared-shape capacity, inherited styles,
-paragraphs/breaks, metadata continuations, Unicode/nonbreaking groups, changing
-continuation widths, and final-response placement. Generator tests exercise every
-English dynamic role, long Gospel citations, text conservation/order, and absent
-homily behavior. Font-dependent layout cases report an explicit skip when fonts
-are missing; full generator tests require the fonts and fail without them.
+Run `npm run test:english` using the bundled fonts or an explicit font-directory
+override. The layout suite covers proportional font widths, shared-shape
+capacity, inherited styles, paragraphs/breaks, metadata continuations,
+Unicode/nonbreaking groups, changing continuation widths, and final-response
+placement. Generator tests exercise every English dynamic role, long Gospel
+citations, text conservation/order, and absent homily behavior. Missing required
+fonts fail the suite rather than silently skipping font-dependent cases.
 
 Model bounds are not a claim of identical rendering across Office applications.
 Validate representative generated decks in Microsoft PowerPoint after template
@@ -256,10 +270,9 @@ first/middle/final pages.
 - Exact weekly fonts include Arial, Arial Narrow, Lucida Sans demibold italic
   (physical weight600), and Wingdings for the existing book icon. Symbol-only
   runs are measured using `a:sym`, not a Latin theme font.
-- Set `INDONESIAN_MASS_FONT_DIR` to an exclusive directory of licensed exact
-  faces, or provision `app/fonts/indonesian-mass` / standard macOS Office fonts.
-  Next traces that font folder alongside the English folder. Fonts are not
-  redistributed or embedded; presentation computers need the same faces.
+- Weekly generation uses the same `app/fonts/pptx` bundle as English. An optional
+  `INDONESIAN_MASS_FONT_DIR` override remains exclusive. Fonts are not embedded
+  in the generated presentation; presentation computers need the same faces.
 - Run `npm run test:pptx` for all generator/shared-engine regressions, or
   `npm run test:indonesian` for weekly/OBS plus shared layout. Full acceptance
   requires both English and weekly fonts, logical ZIP-part equivalence for

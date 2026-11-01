@@ -125,15 +125,7 @@ type FontFace = { alias: string; weight: number; style: string };
 function fontDirectories(profile: "english" | "indonesian"): string[] {
   const override = process.env[`${profile.toUpperCase()}_MASS_FONT_DIR`];
   if (override) return [path.resolve(override)];
-  const provisioned = path.join(process.cwd(), `app/fonts/${profile}-mass`);
-  return [
-    provisioned,
-    "/Applications/Microsoft PowerPoint.app/Contents/Resources/DFonts",
-    "/Applications/Microsoft Word.app/Contents/Resources/DFonts",
-    "/Library/Fonts",
-    "/System/Library/Fonts/Supplemental",
-    path.join(process.env.HOME ?? "", "Library/Fonts"),
-  ];
+  return [path.join(process.cwd(), "app/fonts/pptx")];
 }
 function exactFont(
   family: string,

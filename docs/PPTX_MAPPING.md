@@ -129,19 +129,27 @@ DrawingML run requests bold. The engine verifies that exact face instead of
 synthesizing weight700 or replacing the family. Symbol runs retain their source
 `a:sym` and glyph; measurement selects the symbol face.
 
-Set `INDONESIAN_MASS_FONT_DIR` to a directory containing licensed exact faces.
-That override is exclusive. Otherwise the engine searches
-`app/fonts/indonesian-mass` and standard macOS Office/system/user font directories.
-Typical filenames include `Arial.ttf`, `Arial Bold.ttf`, `Arial Italic.ttf`,
-`Arial Narrow Bold.ttf`, `Arial Narrow Bold Italic.ttf`,
-`Lucida Sans Demibold Italic.ttf`, and `Wingdings.ttf`.
+Both measured generators load the exact bundled `.ttf` files in `app/fonts/pptx`
+by default. There is no default search of macOS Office/system/user directories.
+The shared bundle includes Arial, Arial Narrow, Book Antiqua, Arial Rounded MT
+Bold, Lucida Sans demibold italic, and Wingdings. Optional
+`INDONESIAN_MASS_FONT_DIR` and `ENGLISH_MASS_FONT_DIR` overrides are exclusive:
+remove obsolete Mac-specific values from Vercel to use the bundle.
 
-Fonts must also exist on presentation computers. This repository does not embed
-or redistribute proprietary fonts. Next externalizes `skia-canvas` and traces
-both profile font folders and templates. Install native dependencies for the
-deployment OS/architecture, and provision/mount licensed fonts at runtime.
-English retains its exclusive `ENGLISH_MASS_FONT_DIR` and existing font behavior.
-OBS does not acquire these font-provisioning requirements.
+These are server assets, not public web fonts or fonts embedded in the exported
+PPTX. Presentation computers still need matching fonts. Deployment and
+redistribution must comply with the proprietary font licenses.
+Next externalizes `skia-canvas` and traces `app/fonts/pptx/*.ttf` and templates.
+Install native and optional dependencies for the deployment OS/architecture.
+OBS generation itself remains independent of font measurement.
+
+The download route uses the Node.js runtime and returns a `ReadableStream`
+for every template. It emits buffer views in chunks of at most 64KiB per pull,
+honoring backpressure without a second full-file copy. Responses omit
+`Content-Length` and preserve attachment filenames/MIME type and JSON errors.
+The browser's existing `response.blob()` download flow remains valid.
+This is transport streaming: ZIP generation still finishes in memory first.
+Verify response streaming on a Vercel preview as well as locally.
 
 ## 6. OBS remains legacy
 
