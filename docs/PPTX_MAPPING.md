@@ -33,6 +33,12 @@ liturgy mapping, static first/final content policy, notes, and ZIP assembly.
 - Register the exact physical fonts and measure shaped candidate lines with
   Skia Canvas. All paragraphs sharing a shape use one height budget, including
   fixed headings, labels, tab stops, responses, and symbols.
+- For vertically centered boxes, distinguish nominal line-box height from
+  visible glyph ink. Account for first/last-line font leading and the centered
+  baseline placement when checking ink against the physical shape edges.
+  Keep the font size, line pitch, box geometry and insets unchanged. This lets
+  genuinely fitting three-line lower-thirds stay together without imposing a
+  three-line special case; longer content still paginates.
 - Preserve intended point sizes. Do not use character budgets, clipping, or
   viewer AutoFit to make content fit.
 - Preserve template spacer paragraphs first. If the complete edited shape is
@@ -178,8 +184,10 @@ not a color-swapped copy or a shared set of numerical slide indices.
   rich replacement: initial sentence/title-line emphasis, regular remainder,
   then a regular `U\t` response with paragraph-level last policy.
 - Retain the OBS token's face, size, fill and italic settings. Do not impose the
-  weekly separate response token's color/italic style. Inline emphasis never
-  removes the separating space or forces an additional paragraph.
+  weekly separate response token's color/italic style. Inline sentence emphasis
+  preserves its separating spaces. When a separate title is supplied, title and
+  body are distinct justified paragraphs: the wrapped title's final line remains
+  a normal left-aligned paragraph tail rather than a force-justified soft break.
 - Measure lower-third boxes and full-content boxes independently from actual
   geometry, insets and paragraph spacing. Keep template gaps first, then remove
   only decorative blanks if necessary before paginating. Fixed prompts and

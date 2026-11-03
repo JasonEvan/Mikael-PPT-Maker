@@ -630,14 +630,10 @@ for (const [color, generate] of obsGenerators) {
       const bodyParagraph = find(page.nodes, "a:p").find((p) =>
         text([p]).includes(label),
       )!;
-      assert.ok(
-        text([bodyParagraph]).includes(`${label}${remainder}`),
-        "inline seam retains original whitespace",
-      );
-      if (label === "Bagi keluarga") {
+      if (!data.doaUmat!.intentions.find((item) => item.title === label)) {
         assert.ok(
-          find([bodyParagraph], "a:br").length > 0,
-          "title/body LF is a hard break, not a forced extra paragraph",
+          text([bodyParagraph]).includes(`${label}${remainder}`),
+          "inline sentence emphasis retains its separating whitespace",
         );
       }
     }
@@ -778,3 +774,71 @@ for (const [color, generate] of obsGenerators) {
     }
   });
 }
+
+test("OBS Gospel lower-thirds retain three fitting lines without splitting metadata or its response", async () => {
+  for (const [color, generate] of obsGenerators) {
+    const data = mapped();
+    data.bacaanInjil = {
+      gospelName: "Matius 5:1-12a",
+      epigraph:
+        "Bersukacita dan bergembiralah, karena besarlah ganjaranmu di surga",
+      citation: "Injil Suci menurut Matius 5:1-12a",
+      notesBody: "The full Gospel stays in its original notes.",
+    };
+    const source = await obsTemplate(color);
+    const intro = source.slides.find((slide) =>
+      slide.text.includes("Inilah Injil suci menurut"),
+    )!;
+    const { slides } = await presentation(await generate(data));
+    for (const [original, expected] of [
+      [
+        intro,
+        ["Inilah Injil suci menurut Matius 5:1-12a", "Dimuliakanlah † Tuhan"],
+      ],
+      [source.metadata[2], [data.bacaanInjil.epigraph!, "Matius 5:1-12a"]],
+    ] as const) {
+      const origin = attributes(find(original.nodes, "p14:creationId")[0])[
+        "@_val"
+      ];
+      const pages = slides.filter(
+        (slide) =>
+          attributes(find(slide.nodes, "p14:creationId")[0])["@_val"] ===
+          origin,
+      );
+      assert.equal(
+        pages.length,
+        1,
+        `${color}: the native three-line lower-third fits`,
+      );
+      for (const value of expected)
+        assert.ok(compact(pages[0].text).includes(compact(value)));
+    }
+  }
+});
+
+test("OBS wrapped intention titles end their justified paragraph before the regular body", async () => {
+  const title = "Bagi kita yang berkumpul di sekitar altar.";
+  const body =
+    "Ya Bapa, kuduskanlah kami yang berkumpul mengelilingi meja perjamuan-Mu ini.";
+  for (const [, generate] of obsGenerators) {
+    const data = mapped();
+    data.doaUmat!.intentions = [
+      { title, body, response: "Kuduskanlah kami, ya Tuhan." },
+    ];
+    const { slides } = await presentation(await generate(data));
+    const page = slides.find((slide) => slide.text.includes("Bagi kita"))!;
+    const paragraphs = find(page.nodes, "a:p");
+    const heading = paragraphs.find((p) => text([p]) === title)!;
+    const content = paragraphs.find((p) => text([p]).includes(body))!;
+    assert.ok(
+      heading,
+      "the title is a complete paragraph, so its last line is not force-justified",
+    );
+    assert.ok(
+      content && content !== heading,
+      "the regular body starts its own paragraph",
+    );
+    assert.equal(attributes(find([heading], "a:pPr")[0])["@_algn"], "just");
+    assert.equal(attributes(find([content], "a:pPr")[0])["@_algn"], "just");
+  }
+});

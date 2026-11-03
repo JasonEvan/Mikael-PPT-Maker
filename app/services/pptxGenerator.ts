@@ -115,14 +115,19 @@ function obsIntentionReplacement(
       : lineBreak >= 0
         ? lineBreak
         : body.length;
+  let emphasized = splitAt;
   return {
     paragraphs: [
-      {
-        runs: [
-          { text: body.slice(0, splitAt), bold: true },
-          { text: body.slice(splitAt), bold: false },
-        ],
-      },
+      ...[item.title, item.body].filter(Boolean).map((text) => {
+        const end = Math.max(0, Math.min(text.length, emphasized));
+        emphasized -= text.length + 1;
+        return {
+          runs: [
+            { text: text.slice(0, end), bold: true },
+            { text: text.slice(end), bold: false },
+          ],
+        };
+      }),
       ...(item.response
         ? [
             {

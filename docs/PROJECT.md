@@ -288,9 +288,15 @@ first/middle/final pages.
   label. Gospel citation prefix omission remains OBS-specific.
 - Single-token intentions preserve the initial sentence/title-line emphasis,
   regular remainder and regular tabbed response, inheriting the OBS font/fill
-  rather than weekly response styling. Inline runs preserve word separation and
-  hard breaks. A fitting response is reserved for the end; an oversized response
-  flows after the complete body without loss. Each intention/bait is independent.
+  rather than weekly response styling. Explicit titles and bodies use separate
+  justified paragraphs, so a short last title line stays left-aligned. Sentence
+  emphasis within a body remains inline and preserves word separation.
+  A fitting response is reserved for the end; an oversized response flows after
+  the complete body without loss. Each intention/bait is independent.
+- Centered lower-thirds use visible first/last-line ink clearance, not merely
+  the sum of full font bounding boxes, when checking the physical shape edges.
+  Three genuinely fitting lines stay on one slide without shrinking text,
+  changing box insets, or forcing a fixed three-line pagination limit.
 - The engine supports per-paragraph flow/last policy within a rich replacement.
   Empty roles still advance the Doa Umat state; missing Seruan entries do not
   repeat the first invocation. Existing zero-verse and excluded-placeholder

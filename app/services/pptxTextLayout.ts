@@ -183,6 +183,8 @@ type Line = {
   height: number;
   before: number;
   after: number;
+  topLeading: number;
+  bottomLeading: number;
   paragraph: Paragraph;
   start: boolean;
   end: boolean;
@@ -504,12 +506,24 @@ export async function createPptxTextLayout(
   function measure(
     spans: Span[],
     properties: Xml,
-  ): { width: number; natural: number; ink: number } {
+  ): {
+    width: number;
+    natural: number;
+    ink: number;
+    ascent: number;
+    descent: number;
+    fontAscent: number;
+    fontDescent: number;
+  } {
     let width = 0,
       left = 0,
       right = 0,
       natural = 0,
-      ink = 0;
+      ink = 0,
+      ascent = 0,
+      descent = 0,
+      fontAscent = 0,
+      fontDescent = 0;
     const tabSize = Number(attr(properties, "defTabSz") ?? 457200) / EMU;
     const tabStops = children(child(properties, "a:tabLst"))
       .map((node) => Number(attr(node, "pos")) / EMU)
@@ -554,9 +568,13 @@ export async function createPptxTextLayout(
           ink,
           metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent,
         );
+        ascent = Math.max(ascent, metrics.actualBoundingBoxAscent);
+        descent = Math.max(descent, metrics.actualBoundingBoxDescent);
+        fontAscent = Math.max(fontAscent, metrics.fontBoundingBoxAscent);
+        fontDescent = Math.max(fontDescent, metrics.fontBoundingBoxDescent);
       });
     }
-    return { width: Math.max(width, right) - left, natural, ink };
+    return { width: Math.max(width, right) - left, natural, ink, ascent, descent, fontAscent, fontDescent };
   }
   function spacing(node: Xml | undefined, natural: number): number {
     const points = child(node, "a:spcPts");
@@ -648,11 +666,16 @@ export async function createPptxTextLayout(
       const spans = slices(paragraph.spans, position, fit);
       if (!spans.length)
         spans.push({ value: "", properties: paragraph.spans[0].properties });
+      const ink = measure(spans, paragraph.properties);
+      const leading = (height - ink.natural) / 2;
+      const hasInk = spanText(spans).trim().length > 0;
       result.push({
         spans,
         height,
         before: first ? before : 0,
         after: 0,
+        topLeading: hasInk ? leading + ink.fontAscent - ink.ascent : 0,
+        bottomLeading: hasInk ? leading + ink.fontDescent - ink.descent : 0,
         paragraph,
         start: first,
         end: false,
@@ -674,6 +697,8 @@ export async function createPptxTextLayout(
           before: 0,
           after: 0,
           paragraph,
+          topLeading: 0,
+          bottomLeading: 0,
           start: false,
           end: false,
           from: position,
@@ -686,6 +711,21 @@ export async function createPptxTextLayout(
     return result;
   }
   const cost = (line: Line) => line.before + line.height + line.after;
+  function occupiedHeight(
+    box: Geometry,
+    total: number,
+    first?: Line,
+    last?: Line,
+  ): number {
+    if (attr(box.body, "anchor") !== "ctr" || !first || !last) return total;
+    // PowerPoint centers the nominal line boxes, not the glyph ink. Font
+    // leading can occupy the vertical insets without crossing the shape edge.
+    // Reclaim only the smaller edge clearance: both ends must remain visible.
+    const top = first.topLeading + Number(attr(box.body, "tIns") ?? 45720) / EMU;
+    const bottom =
+      last.bottomLeading + Number(attr(box.body, "bIns") ?? 45720) / EMU;
+    return Math.max(0, total - 2 * Math.min(top, bottom));
+  }
   function render(shape: Shape, page: Line[], box: Geometry): string {
     const node = clone(shape.node),
       tx = child(node, "p:txBody")!;
@@ -948,14 +988,12 @@ export async function createPptxTextLayout(
         const firstBox = geometry(file, shape.node),
           nextBox = geometry(file, nextShape.node);
         if (templateSpacers.size) {
-          let requiredHeight = flow.reduce(
-            (sum, p) =>
-              sum +
-              lines(p, firstBox).reduce(
-                (height, line) => height + cost(line),
-                0,
-              ),
-            0,
+          let wrapped = flow.flatMap((p) => lines(p, firstBox));
+          let requiredHeight = occupiedHeight(
+            firstBox,
+            wrapped.reduce((sum, line) => sum + cost(line), 0),
+            wrapped[0],
+            wrapped.at(-1),
           );
           while (
             requiredHeight > firstBox.height + 0.001 &&
@@ -972,20 +1010,24 @@ export async function createPptxTextLayout(
             if (index < 0)
               index = flow.findIndex((p) => templateSpacers.has(p));
             const spacer = flow[index];
-            requiredHeight -= lines(spacer, firstBox).reduce(
-              (sum, line) => sum + cost(line),
-              0,
+            wrapped = wrapped.filter((line) => line.paragraph !== spacer);
+            requiredHeight = occupiedHeight(
+              firstBox,
+              wrapped.reduce((sum, line) => sum + cost(line), 0),
+              wrapped[0],
+              wrapped.at(-1),
             );
             templateSpacers.delete(spacer);
             flow.splice(index, 1);
           }
         }
         const dynamicFooters = flow.filter((p) => p.dynamicLast);
-        const dynamicFooterHeight = dynamicFooters.reduce(
-          (sum, p) =>
-            sum +
-            lines(p, nextBox).reduce((height, line) => height + cost(line), 0),
-          0,
+        const dynamicFooterLines = dynamicFooters.flatMap((p) => lines(p, nextBox));
+        const dynamicFooterHeight = occupiedHeight(
+          nextBox,
+          dynamicFooterLines.reduce((sum, line) => sum + cost(line), 0),
+          dynamicFooterLines[0],
+          dynamicFooterLines.at(-1),
         );
         if (dynamicFooterHeight > nextBox.height + 0.001) {
           // An oversized response is ordered content, not an indivisible static
@@ -1015,7 +1057,10 @@ export async function createPptxTextLayout(
             const wrapped = lines(p, box);
             let count = 0;
             for (const line of wrapped) {
-              if (used + cost(line) > box.height + 0.001) break;
+              if (
+                occupiedHeight(box, used + cost(line), page[0] ?? line, line) >
+                box.height + 0.001
+              ) break;
               page.push(line);
               used += cost(line);
               count++;
@@ -1065,18 +1110,32 @@ export async function createPptxTextLayout(
           const footers = last.flatMap((p) => lines(p, box));
           const footerCost = footers.reduce((sum, line) => sum + cost(line), 0);
           if (
-            footerCost > box.height + 0.001 &&
+            occupiedHeight(box, footerCost, footers[0], footers.at(-1)) >
+              box.height + 0.001 &&
             last.some((p) => !p.dynamicLast)
           )
             throw new Error(
               `${file}: last-only static text exceeds the entire shape capacity.`,
             );
-          if (!pending.length && used + footerCost <= box.height + 0.001)
+          if (
+            !pending.length &&
+            occupiedHeight(
+              box,
+              used + footerCost,
+              page[0] ?? footers[0],
+              footers.at(-1) ?? page.at(-1),
+            ) <= box.height + 0.001
+          )
             page.push(...footers);
           else if (!pending.length && footers.length) {
             const nextFooters = last.flatMap((p) => lines(p, nextBox));
             if (
-              nextFooters.reduce((sum, line) => sum + cost(line), 0) >
+              occupiedHeight(
+                nextBox,
+                nextFooters.reduce((sum, line) => sum + cost(line), 0),
+                nextFooters[0],
+                nextFooters.at(-1),
+              ) >
               nextBox.height + 0.001
             ) {
               throw new Error(
@@ -1123,7 +1182,12 @@ export async function createPptxTextLayout(
         for (let index = 0; index < pages.length; index++) {
           const box = index ? nextBox : firstBox;
           if (
-            pages[index].reduce((sum, line) => sum + cost(line), 0) >
+            occupiedHeight(
+              box,
+              pages[index].reduce((sum, line) => sum + cost(line), 0),
+              pages[index][0],
+              pages[index].at(-1),
+            ) >
             box.height + 0.001
           )
             throw new Error(
