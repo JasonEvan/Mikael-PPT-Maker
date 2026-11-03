@@ -4,6 +4,7 @@ import { generatePPTXBuffer } from "@/app/services/pptxGenerator";
 import {
   generatePPTXOBSBuffer,
   generatePPTXOBSKuningBuffer,
+  generatePPTXOBSUnguBuffer,
 } from "@/app/services/pptxGeneratorOBS";
 import { generateEnglishMassPptxBuffer } from "@/app/services/englishMassPptxGenerator";
 import { EnglishMassParseResult } from "@/app/utils/englishMassParser";
@@ -29,7 +30,7 @@ function pptxDownload(buffer: Buffer, filename: string): Response {
   });
 }
 
-type TemplateId = "mingguan" | "obs" | "obs-kuning";
+type TemplateId = "mingguan" | "obs" | "obs-kuning" | "obs-ungu";
 
 // ponytail: API route to generate and download filled PPTX
 export async function POST(req: NextRequest) {
@@ -41,7 +42,9 @@ export async function POST(req: NextRequest) {
     }
 
     const template: TemplateId =
-      body.template === "mingguan" || body.template === "obs-kuning"
+      body.template === "mingguan" ||
+      body.template === "obs-kuning" ||
+      body.template === "obs-ungu"
         ? body.template
         : "obs";
 
@@ -62,14 +65,18 @@ export async function POST(req: NextRequest) {
         ? await generatePPTXBuffer(mappedData)
         : template === "obs-kuning"
           ? await generatePPTXOBSKuningBuffer(mappedData)
-          : await generatePPTXOBSBuffer(mappedData);
+          : template === "obs-ungu"
+            ? await generatePPTXOBSUnguBuffer(mappedData)
+            : await generatePPTXOBSBuffer(mappedData);
 
     const templateDownloadName =
       template === "mingguan"
         ? "Mingguan"
         : template === "obs-kuning"
           ? "OBS_Kuning"
-          : "OBS_Hijau";
+          : template === "obs-ungu"
+            ? "OBS_Ungu"
+            : "OBS_Hijau";
 
     return pptxDownload(
       pptxBuffer,

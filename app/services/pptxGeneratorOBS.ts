@@ -21,6 +21,15 @@ export function generatePPTXOBSKuningBuffer(
   );
 }
 
+export function generatePPTXOBSUnguBuffer(
+  mappedData: MappedLiturgyData,
+): Promise<Buffer> {
+  return generatePPTXOBSBufferForTemplate(
+    mappedData,
+    "Template_PPT_OBS_Ungu.pptx",
+  );
+}
+
 function generatePPTXOBSBufferForTemplate(
   mappedData: MappedLiturgyData,
   templateFileName: string,

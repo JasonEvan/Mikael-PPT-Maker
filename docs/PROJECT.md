@@ -175,7 +175,7 @@ missing sections should be visibly flagged in the preview, not hidden.
 - All English dynamic text destinations use the shared `pptxTextLayout.ts`:
   song titles, reading introductions/bodies, psalm verses/refrains, acclamation,
   prayers, intercessions, Kyrie, and homily. There are no character-budget
-  pagination limits in this English export path. Indonesian weekly and both
+  pagination limits in this English export path. Indonesian weekly and all three
   OBS variants use the same measured engine with their own template geometry.
 - Layout is measured with Skia Canvas and the exact template fonts. The engine
   resolves text-box extents/insets and inherited paragraph/run properties,
@@ -251,7 +251,7 @@ first/middle/final pages.
 ## Indonesian weekly: measured layout
 
 - `generatePPTXBuffer` uses the shared measured Indonesian template generator,
-  as do both OBS wrappers. The API, parser, UI, and streaming route are unchanged.
+  as do all OBS wrappers. Parsing and streamed download behavior remain shared.
 - Every existing weekly dynamic role is measured, including previously
   unbounded Seruan Tobat, reading metadata, Gospel-name dialogue, and psalm
   verses. Legacy character budgets and combined-response thresholds do not
@@ -279,9 +279,14 @@ first/middle/final pages.
 
 ## Indonesian OBS: measured layout
 
-- Both Hijau and Kuning use the shared Skia layout, with no character-count
+- Hijau, Kuning, and Ungu use the shared Skia layout, with no character-count
   fitting path. Their source templates are retained independently: they differ
   in slide ordering, paragraph spacing and some font sizes, not only color.
+- Select **Template OBS Ungu** in the Indonesian download selector to use
+  `app/template/Template_PPT_OBS_Ungu.pptx`. The `obs-ungu` API option calls
+  `generatePPTXOBSUnguBuffer` with the same OBS profile, including anonymous
+  Seruan/Gospel mapping and single-placeholder intentions. Browser download
+  filenames use the `OBS_Ungu` suffix; default selection remains OBS Hijau.
 - Seruan Tobat invocation-only slides use lower-third geometry; each invocation
   finishes before its existing separate congregation-response slide. Gospel
   metadata follows its introduction even though its own slide has no section
@@ -307,7 +312,7 @@ first/middle/final pages.
 - Scripture stays in original metadata notes resolved through relationships.
   Continuation slides keep artwork/layout/media but do not share scripture
   notes. Fixed content and original hidden-slide state are preserved.
-- Regression coverage exercises both colors, every dynamic role, complete
+- Regression coverage exercises all three colors, every dynamic role, complete
   source/order, inline typography, giant responses, empty-state routing and
   notes ownership. Validate rendered glyphs against text-box frames in PowerPoint
   and check default/explicit OBS downloads on the production build.

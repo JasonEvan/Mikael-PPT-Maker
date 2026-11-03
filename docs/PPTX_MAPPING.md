@@ -12,16 +12,23 @@ hardcoded slide indices.
 | `generatePPTXBuffer`          | `Template_Mingguan.pptx`       | Measured weekly layout              |
 | `generatePPTXOBSBuffer`       | `Template_PPT_OBS_Hijau.pptx`  | Measured OBS layout                 |
 | `generatePPTXOBSKuningBuffer` | `Template_PPT_OBS_Kuning.pptx` | Measured OBS layout                 |
+| `generatePPTXOBSUnguBuffer`   | `Template_PPT_OBS_Ungu.pptx`   | Measured OBS layout                 |
 
 `generatePPTXBufferForTemplate` is the sole shared Indonesian implementation.
-Weekly and both OBS wrappers use measured layout with the Indonesian font
+Weekly and all OBS wrappers use measured layout with the Indonesian font
 profile. No character-count pagination or legacy fallback remains.
 English shares the measurement engine while retaining its own generator,
 content mapping, font profile, and pagination policies.
 
 The API selects the weekly wrapper only for `template: "mingguan"`. Its existing
-OBS/default routing and English early dispatch remain unchanged. DOCX parsing,
-UI, and the `MappedLiturgyData` contract are unchanged.
+OBS/default routing and English early dispatch remain unchanged. DOCX parsing and
+the `MappedLiturgyData` contract are unchanged.
+
+The Indonesian template selector includes `obs-ungu` (Template OBS Ungu).
+Its generator uses the uploaded Ungu template and the same OBS role profile.
+The API download is `Slide_Liturgi_Misa_OBS_Ungu.pptx`; the browser retains the
+source-document-based filename with the `OBS_Ungu` suffix. Omitting the template
+still selects OBS Hijau. Existing Hijau/Kuning, weekly, and English IDs are unchanged.
 
 ## 2. Shared Indonesian measured layout
 
@@ -169,7 +176,7 @@ Verify response streaming on a Vercel preview as well as locally.
 
 ## 6. OBS-specific mapping and appearance
 
-Hijau and Kuning use the same role rules, but their slide counts, positions,
+Hijau, Kuning, and Ungu use the same role rules, but their slide counts, positions,
 font sizes, spacing and notes relationships differ. Read each original template,
 not a color-swapped copy or a shared set of numerical slide indices.
 

@@ -8,6 +8,7 @@ import { generatePPTXBuffer } from "./pptxGenerator";
 import {
   generatePPTXOBSBuffer,
   generatePPTXOBSKuningBuffer,
+  generatePPTXOBSUnguBuffer,
 } from "./pptxGeneratorOBS";
 import type { MappedLiturgyData } from "../utils/docxParser";
 
@@ -304,6 +305,7 @@ test("weekly metadata and intentions retain template faces, weights, response st
 const obsGenerators = [
   ["Hijau", generatePPTXOBSBuffer],
   ["Kuning", generatePPTXOBSKuningBuffer],
+  ["Ungu", generatePPTXOBSUnguBuffer],
 ] as const;
 
 async function obsTemplate(color: string) {
@@ -394,7 +396,7 @@ function obsDynamicText(
     .join("");
 }
 
-test("both OBS exports require provisioned Indonesian fonts rather than silently substituting", async () => {
+test("all OBS exports require provisioned Indonesian fonts rather than silently substituting", async () => {
   const previous = process.env.INDONESIAN_MASS_FONT_DIR;
   process.env.INDONESIAN_MASS_FONT_DIR =
     "/nonexistent-licensed-indonesian-fonts";
