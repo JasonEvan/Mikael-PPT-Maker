@@ -93,11 +93,13 @@ their established behavior.
 | Anamnesis             | `ANAMNESIS (2A/2B/3A/3B)` group headings; `anamnesisType`                                       | Keep the matching three-slide group unchanged and remove the other nine slides                       |
 | Doa Sesudah Komuni    | `SESUDAH KOMUNI` state; `doaSesudahKomuni`                                                        | Opening prompts initially; preserve any actual fixed closing after the final body                   |
 
-The weekly template contains four consecutive three-slide Anamnesis groups.
-Each starts with its own visible title, followed by two continuation slides.
-The generator locates the groups by their titles rather than by slide number.
-If the source code is missing, unsupported, or conflicting, it leaves all four
-groups in place for manual selection. OBS templates are not affected.
+The weekly and all three OBS templates contain four consecutive three-slide
+Anamnesis groups. Weekly labels only the first slide of each group; OBS labels
+all three. The generator locates groups by title in the original presentation
+order, so inserting continuation slides earlier in the deck does not change
+which group is selected. The matching slides and their notes stay intact;
+unused slides and their associated notes parts are removed. Missing, unsupported,
+or conflicting source codes leave all four groups available for manual selection.
 
 `formatEpigraph` retains the existing curly-quote normalization. Citation cleaners
 retain the existing speaker/prefix rules. Weekly does not adopt OBS's optional

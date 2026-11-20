@@ -150,9 +150,35 @@ export interface PptxGeneratorOptions {
 
 type PresentationSlide = { rId: string; fileName: string };
 
+function partRelationships(fileName: string): string {
+  return path.posix.join(
+    path.posix.dirname(fileName),
+    "_rels",
+    `${path.posix.basename(fileName)}.rels`,
+  );
+}
+
+async function slideNotesPart(zip: JSZip, slideFileName: string) {
+  const xml = await zip.file(partRelationships(slideFileName))?.async("text");
+  const target = xml?.match(
+    /<Relationship [^>]*Type="http:\/\/schemas\.openxmlformats\.org\/officeDocument\/2006\/relationships\/notesSlide"[^>]*Target="([^"]+)"/i,
+  )?.[1];
+  return target && path.posix.join(path.posix.dirname(slideFileName), target);
+}
+
 async function removeSlides(zip: JSZip, slides: PresentationSlide[]) {
   const ids = new Set(slides.map(({ rId }) => rId));
   const parts = new Set(slides.map(({ fileName }) => `/${fileName}`));
+  for (const { fileName } of slides) {
+    const notes = await slideNotesPart(zip, fileName);
+    if (notes) {
+      parts.add(`/${notes}`);
+      zip.remove(notes);
+      zip.remove(partRelationships(notes));
+    }
+    zip.remove(fileName);
+    zip.remove(partRelationships(fileName));
+  }
   const entries = [
     {
       file: "ppt/presentation.xml",
@@ -177,10 +203,6 @@ async function removeSlides(zip: JSZip, slides: PresentationSlide[]) {
       file,
       xml.replace(tags, (tag, key) => (removed.has(key) ? "" : tag)),
     );
-  }
-  for (const { fileName } of slides) {
-    zip.remove(fileName);
-    zip.remove(`ppt/slides/_rels/${path.posix.basename(fileName)}.rels`);
   }
 }
 
@@ -341,21 +363,8 @@ export async function generatePPTXBufferForTemplate(
   const updateSlideNotes = async (slideFileName: string, notesText: string) => {
     if (!notesText) return;
 
-    const slideNum = slideFileName.match(/slide(\d+)\.xml$/)?.[1];
-    if (!slideNum) return;
-
-    const relsFile = zip.file(`ppt/slides/_rels/slide${slideNum}.xml.rels`);
-    if (!relsFile) return;
-
-    const relsXml = await relsFile.async("text");
-    const target = relsXml.match(
-      /<Relationship [^>]*Type="http:\/\/schemas\.openxmlformats\.org\/officeDocument\/2006\/relationships\/notesSlide"[^>]*Target="([^\"]+)"/i,
-    )?.[1];
-    if (!target) return;
-
-    const notesFileName = path.posix.normalize(
-      path.posix.join("ppt/slides", target),
-    );
+    const notesFileName = await slideNotesPart(zip, slideFileName);
+    if (!notesFileName) return;
     const notesFile = zip.file(notesFileName);
     if (!notesFile) return;
 
@@ -377,11 +386,8 @@ export async function generatePPTXBufferForTemplate(
   let hasPassedDoaKomuniTitle = false;
   let hasHandledDoaKomuni = false;
 
-  const anamnesisType =
-    templateFileName === "Template_Mingguan.pptx"
-      ? mappedData.anamnesisType
-      : undefined;
-  const anamnesisStarts: { type: string; index: number }[] = [];
+  const { anamnesisType } = mappedData;
+  const anamnesisHeadings = new Map<number, string>();
 
   for (const [index, slide] of slideOrder.entries()) {
     const slideZip = zip.file(slide.fileName);
@@ -403,7 +409,7 @@ export async function generatePPTXBufferForTemplate(
       const code = slideTextUpper
         .trimStart()
         .match(/^ANAMNESIS\s*\(([23][AB])\)/)?.[1];
-      if (code) anamnesisStarts.push({ type: code.toLowerCase(), index });
+      if (code) anamnesisHeadings.set(index, code.toLowerCase());
     }
 
     // Check if slide is Doa Umat Title slide (Slide 62: DOA UMAT (umat berdiri))
@@ -651,21 +657,32 @@ export async function generatePPTXBufferForTemplate(
 
   if (anamnesisType) {
     const groupSize = 3;
-    const first = anamnesisStarts[0]?.index ?? 0;
+    const groupCount = 4;
+    const first = anamnesisHeadings.keys().next().value ?? 0;
+    const groups = Array.from({ length: groupCount }, (_, group) => {
+      const index = first + group * groupSize;
+      return { index, type: anamnesisHeadings.get(index) };
+    });
+    // Mingguan labels only the first slide; OBS labels all three.
+    const labelsPerGroup = anamnesisHeadings.size / groupCount;
     if (
-      new Set(anamnesisStarts.map(({ type }) => type)).size !== 4 ||
-      anamnesisStarts.length !== 4 ||
-      !anamnesisStarts.some(({ type }) => type === anamnesisType) ||
-      anamnesisStarts.some(
-        ({ index }, group) => index !== first + group * groupSize,
-      ) ||
-      first + anamnesisStarts.length * groupSize > slideOrder.length
+      (labelsPerGroup !== 1 && labelsPerGroup !== groupSize) ||
+      new Set(groups.map(({ type }) => type)).size !== groupCount ||
+      !groups.some(({ type }) => type === anamnesisType) ||
+      first + groupCount * groupSize > slideOrder.length ||
+      groups.some(({ index, type }) => {
+        if (!type) return true;
+        for (let offset = 1; offset < labelsPerGroup; offset++) {
+          if (anamnesisHeadings.get(index + offset) !== type) return true;
+        }
+        return false;
+      })
     ) {
       throw new Error(
-        "Susunan slide Anamnesis pada Template Mingguan tidak valid.",
+        `Susunan slide Anamnesis pada ${templateFileName} tidak valid.`,
       );
     }
-    const unusedSlides = anamnesisStarts.flatMap(({ type, index }) =>
+    const unusedSlides = groups.flatMap(({ type, index }) =>
       type === anamnesisType ? [] : slideOrder.slice(index, index + groupSize),
     );
     await removeSlides(zip, unusedSlides);

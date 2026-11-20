@@ -89,9 +89,9 @@ continuations to the existing deck. Matching never depends on these ordinals.
 - Musical notation (Mazmur melody, Bait Pengantar Injil, Anamnesis) is
   **already present as styled text** in the template using a custom
   notation encoding (characters like `j`, `k`, `.`, `!`, `#` render as
-  pitch/octave marks via a special font). The weekly generator keeps the
-  Anamnesis notation and lyrics intact and selects one of four three-slide
-  groups when the document specifies `2a`, `2b`, `3a`, or `3b`.
+  pitch/octave marks via a special font). The Mingguan and OBS generators
+  keep the Anamnesis notation and lyrics intact and select one of four
+  three-slide groups when the document specifies `2a`, `2b`, `3a`, or `3b`.
 - When a source section is genuinely not present in that week's Word
   doc (e.g. "Seruan Tobat" is sometimes replaced by a different penance
   rite), the matching placeholder is simply **left blank** — the slide
