@@ -69,7 +69,7 @@ Raja-raja 19:9a.11-13a**`
 
 ## Target document: the PPTX template
 
-`Template_Mingguan.pptx` currently contains **112 slides**, with the full
+`Template_Mingguan.pptx` currently contains **121 slides**, with the full
 Mass running order, fonts, layout, and styling. It is not a small set of
 reusable master slides: the generator edits selected placeholders and adds
 continuations to the existing deck. Matching never depends on these ordinals.
@@ -89,9 +89,9 @@ continuations to the existing deck. Matching never depends on these ordinals.
 - Musical notation (Mazmur melody, Bait Pengantar Injil, Anamnesis) is
   **already present as styled text** in the template using a custom
   notation encoding (characters like `j`, `k`, `.`, `!`, `#` render as
-  pitch/octave marks via a special font). This notation is fixed and
-  never changes week to week — only the lyric placeholders below/beside
-  it change.
+  pitch/octave marks via a special font). The weekly generator keeps the
+  Anamnesis notation and lyrics intact and selects one of four three-slide
+  groups when the document specifies `2a`, `2b`, `3a`, or `3b`.
 - When a source section is genuinely not present in that week's Word
   doc (e.g. "Seruan Tobat" is sometimes replaced by a different penance
   rite), the matching placeholder is simply **left blank** — the slide

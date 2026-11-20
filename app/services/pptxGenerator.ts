@@ -148,6 +148,42 @@ export interface PptxGeneratorOptions {
   usesPlaceholderOnlySeruanTobatSlides?: boolean;
 }
 
+type PresentationSlide = { rId: string; fileName: string };
+
+async function removeSlides(zip: JSZip, slides: PresentationSlide[]) {
+  const ids = new Set(slides.map(({ rId }) => rId));
+  const parts = new Set(slides.map(({ fileName }) => `/${fileName}`));
+  const entries = [
+    {
+      file: "ppt/presentation.xml",
+      tags: /<p:sldId\b[^>]*\br:id="([^"]+)"[^>]*\/>/g,
+      removed: ids,
+    },
+    {
+      file: "ppt/_rels/presentation.xml.rels",
+      tags: /<Relationship\b[^>]*\bId="([^"]+)"[^>]*\/>/g,
+      removed: ids,
+    },
+    {
+      file: "[Content_Types].xml",
+      tags: /<Override\b[^>]*\bPartName="([^"]+)"[^>]*\/>/g,
+      removed: parts,
+    },
+  ];
+  for (const { file, tags, removed } of entries) {
+    const xml = await zip.file(file)?.async("text");
+    if (!xml) throw new Error(`Bagian PowerPoint tidak ditemukan: ${file}.`);
+    zip.file(
+      file,
+      xml.replace(tags, (tag, key) => (removed.has(key) ? "" : tag)),
+    );
+  }
+  for (const { fileName } of slides) {
+    zip.remove(fileName);
+    zip.remove(`ppt/slides/_rels/${path.posix.basename(fileName)}.rels`);
+  }
+}
+
 // ponytail: generate filled PPTX from template and MappedLiturgyData
 export async function generatePPTXBufferForTemplate(
   mappedData: MappedLiturgyData,
@@ -192,7 +228,7 @@ export async function generatePPTXBufferForTemplate(
   const sldIdMatches = presentationXml.matchAll(
     /<p:sldId [^>]*r:id="([^"]+)"[^>]*>/g,
   );
-  const slideOrder: { rId: string; fileName: string }[] = [];
+  const slideOrder: PresentationSlide[] = [];
   for (const match of sldIdMatches) {
     const rId = match[1];
     const target = rIdMap[rId];
@@ -219,7 +255,6 @@ export async function generatePPTXBufferForTemplate(
     if (val > maxSldId) maxSldId = val;
   }
 
-  // ponytail: helper to dynamically duplicate a slide file, update Relationships & presentation.xml
   const duplicateSlide = async (
     sourceFileName: string,
     targetRId: string,
@@ -342,8 +377,13 @@ export async function generatePPTXBufferForTemplate(
   let hasPassedDoaKomuniTitle = false;
   let hasHandledDoaKomuni = false;
 
-  // ponytail: process each slide placeholder using Content Slide filtering + Content Pattern Anchors (ZERO slide index dependency)
-  for (const slide of slideOrder) {
+  const anamnesisType =
+    templateFileName === "Template_Mingguan.pptx"
+      ? mappedData.anamnesisType
+      : undefined;
+  const anamnesisStarts: { type: string; index: number }[] = [];
+
+  for (const [index, slide] of slideOrder.entries()) {
     const slideZip = zip.file(slide.fileName);
     if (!slideZip) continue;
 
@@ -358,6 +398,13 @@ export async function generatePPTXBufferForTemplate(
       })
       .join(" ")
       .toUpperCase();
+
+    if (anamnesisType) {
+      const code = slideTextUpper
+        .trimStart()
+        .match(/^ANAMNESIS\s*\(([23][AB])\)/)?.[1];
+      if (code) anamnesisStarts.push({ type: code.toLowerCase(), index });
+    }
 
     // Check if slide is Doa Umat Title slide (Slide 62: DOA UMAT (umat berdiri))
     if (
@@ -600,6 +647,28 @@ export async function generatePPTXBufferForTemplate(
       }
       await updateSlideNotes(slide.fileName, notesText);
     }
+  }
+
+  if (anamnesisType) {
+    const groupSize = 3;
+    const first = anamnesisStarts[0]?.index ?? 0;
+    if (
+      new Set(anamnesisStarts.map(({ type }) => type)).size !== 4 ||
+      anamnesisStarts.length !== 4 ||
+      !anamnesisStarts.some(({ type }) => type === anamnesisType) ||
+      anamnesisStarts.some(
+        ({ index }, group) => index !== first + group * groupSize,
+      ) ||
+      first + anamnesisStarts.length * groupSize > slideOrder.length
+    ) {
+      throw new Error(
+        "Susunan slide Anamnesis pada Template Mingguan tidak valid.",
+      );
+    }
+    const unusedSlides = anamnesisStarts.flatMap(({ type, index }) =>
+      type === anamnesisType ? [] : slideOrder.slice(index, index + groupSize),
+    );
+    await removeSlides(zip, unusedSlides);
   }
 
   // ponytail: re-zip into nodebuffer binary

@@ -61,7 +61,10 @@ export interface MappedDoaUmat {
   closing?: string;
 }
 
+type AnamnesisType = "2a" | "2b" | "3a" | "3b";
+
 export interface MappedLiturgyData {
+  anamnesisType?: AnamnesisType;
   seruanTobat?: string[];
   doaKolekta?: string;
   bacaanPertama?: MappedReading;
@@ -834,15 +837,21 @@ function groupIntoSections(
       // In this document format, the priest intro is immediately before the
       // first lektor intention, so it has already been appended to the
       // preceding section (normally the Gospel).
-      const previousParagraph = currentSection?.paragraphs[
-        (currentSection?.paragraphs.length ?? 0) - 1
-      ];
+      const previousParagraph =
+        currentSection?.paragraphs[
+          (currentSection?.paragraphs.length ?? 0) - 1
+        ];
       if (
         previousParagraph &&
-        /^(?:I|Imam)[.:\s\t]/i.test(normalizeSpeakerPrefix(previousParagraph.rawText))
+        /^(?:I|Imam)[.:\s\t]/i.test(
+          normalizeSpeakerPrefix(previousParagraph.rawText),
+        )
       ) {
         currentSection?.paragraphs.pop();
-        if (currentSection?.body?.[currentSection.body.length - 1] === previousParagraph.rawText) {
+        if (
+          currentSection?.body?.[currentSection.body.length - 1] ===
+          previousParagraph.rawText
+        ) {
           currentSection.body.pop();
         }
         doaUmatIntro.push(previousParagraph);
@@ -1022,6 +1031,24 @@ function processSectionDetails(
   return result;
 }
 
+function selectAnamnesisType(
+  paragraphs: LiturgyParagraph[],
+): AnamnesisType | undefined {
+  let type: string | undefined;
+  for (const { rawText } of paragraphs) {
+    for (const match of rawText.matchAll(
+      /\banamnesis\s*[:–-]?\s*(?:\(\s*(\d+[a-z])\s*\)|(\d+[a-z])\b)/gi,
+    )) {
+      const code = (match[1] ?? match[2]).toLowerCase();
+      if (type && code !== type) return undefined;
+      type = code;
+    }
+  }
+  return type === "2a" || type === "2b" || type === "3a" || type === "3b"
+    ? type
+    : undefined;
+}
+
 // ponytail: select & map parsed sections to MVP target placeholders, tracking unmatched sections
 export function selectRelevantSections(
   parsed: DocxParseResult,
@@ -1030,6 +1057,8 @@ export function selectRelevantSections(
   const mappedData: MappedLiturgyData = {
     unmatchedSections: [],
   };
+  const anamnesisType = selectAnamnesisType(parsed.rawParagraphs ?? []);
+  if (anamnesisType) mappedData.anamnesisType = anamnesisType;
 
   for (const sec of parsed.sections) {
     const titleNorm = sec.title.toUpperCase();

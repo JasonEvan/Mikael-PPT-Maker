@@ -21,8 +21,9 @@ English shares the measurement engine while retaining its own generator,
 content mapping, font profile, and pagination policies.
 
 The API selects the weekly wrapper only for `template: "mingguan"`. Its existing
-OBS/default routing and English early dispatch remain unchanged. DOCX parsing and
-the `MappedLiturgyData` contract are unchanged.
+OBS/default routing and English early dispatch remain unchanged. The Indonesian
+Word mapping reads the code after `Anamnesis` (for example, `Anamnesis(2b)`)
+into `anamnesisType`.
 
 The Indonesian template selector includes `obs-ungu` (Template OBS Ungu).
 Its generator uses the uploaded Ungu template and the same OBS role profile.
@@ -89,7 +90,14 @@ their established behavior.
 | Doa Umat intentions   | Following two-placeholder slide; `doaUmat.intentions`                                             | Bold title once, regular body, original-style response after its own body                           |
 | Doa Umat closing      | Following placeholder/closing slide; `doaUmat.closing`                                            | Complete closing text, then fixed `U Amin` only at the end                                          |
 | Doa Atas Persembahan  | `DOA ATAS PERSEMBAHAN`; `doaAtasPersembahan`                                                      | Heading only initially; fixed response only after the final body                                    |
+| Anamnesis             | `ANAMNESIS (2A/2B/3A/3B)` group headings; `anamnesisType`                                       | Keep the matching three-slide group unchanged and remove the other nine slides                       |
 | Doa Sesudah Komuni    | `SESUDAH KOMUNI` state; `doaSesudahKomuni`                                                        | Opening prompts initially; preserve any actual fixed closing after the final body                   |
+
+The weekly template contains four consecutive three-slide Anamnesis groups.
+Each starts with its own visible title, followed by two continuation slides.
+The generator locates the groups by their titles rather than by slide number.
+If the source code is missing, unsupported, or conflicting, it leaves all four
+groups in place for manual selection. OBS templates are not affected.
 
 `formatEpigraph` retains the existing curly-quote normalization. Citation cleaners
 retain the existing speaker/prefix rules. Weekly does not adopt OBS's optional
